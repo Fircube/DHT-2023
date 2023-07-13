@@ -100,9 +100,9 @@ func (node *Node) StopRPCServer() {
 //
 // Re-connect to the client every time can be slow. You can use connection pool to improve the performance.
 func (node *Node) RemoteCall(addr string, method string, args interface{}, reply interface{}) error {
-	if method != "Node.Ping" {
-		logrus.Infof("[RemoteCall] [%s] ask %s to %s with args:%v", node.Addr, addr, method, args)
-	}
+	// if method != "Node.Ping" && method != "Node.FindSuccessor" {
+	// 	logrus.Infof("[RemoteCall] [%s] ask %s to %s with args:%v", node.Addr, addr, method, args)
+	// }
 	if addr == "" {
 		logrus.Error("[RemoteCall] with a empty address")
 		return fmt.Errorf("[RemoteCall] with a empty address")
@@ -184,12 +184,12 @@ func (node *Node) FindSuccessor(arg NodeInf, reply *NodeInf) error {
 		logrus.Errorf("[FindSuccessor] fail to get [%s] 's successor", node.Addr)
 		return fmt.Errorf("[FindSuccessor] fail to get [%s] 's successor", node.Addr)
 	}
-	if (arg.Identify == suc.Identify) || (Contain(arg.Identify, node.Identify, suc.Identify)) {
+	if (arg.Identify.Cmp(suc.Identify) == 0) || (Contain(arg.Identify, node.Identify, suc.Identify)) {
 		*reply = suc
 		return nil
 	}
-	closerNode := node.closestPrecedingFinger(node.Identify)
-	err := node.RemoteCall(closerNode.Addr, "FindSuccessor", arg, reply)
+	closerNode := node.closestPrecedingFinger(arg.Identify)
+	err := node.RemoteCall(closerNode.Addr, "Node.FindSuccessor", arg, reply)
 	if err != nil {
 		logrus.Errorf("[FindSuccessor] [%s] fail to RemoteCall %s to <FindSuccessor> err: %s", node.Addr, closerNode.Addr, err)
 		return fmt.Errorf("[FindSuccessor] [%s] fail to RemoteCall %s to <FindSuccessor>", node.Addr, closerNode.Addr)
@@ -466,10 +466,6 @@ func (node *Node) Create() {
 	logrus.Infof("[Create] [%s]", node.Addr)
 	nodeId := NodeInf{node.Addr, node.Identify}
 
-	// node.predecessorLock.Lock()
-	// node.predecessor = NodeInf{}
-	// node.predecessorLock.Unlock()
-
 	node.successorListLock.Lock()
 	node.successorList[0] = nodeId
 	node.successorListLock.Unlock()
@@ -487,10 +483,10 @@ func (node *Node) Create() {
 
 // Join an existing network. Return "true" if join succeeded and "false" if not.
 func (node *Node) Join(addr string) bool {
-	// if node.online {
-	// 	logrus.Errorf("[Join] [%s] has already joined %s", node.Addr, addr)
-	// 	return false
-	// }
+	//  if node.online {
+	//  	logrus.Errorf("[Join] [%s] has already joined %s", node.Addr, addr)
+	//  	return false
+	//  }
 	node.online = true
 	logrus.Infof("[Join] join [%s] to %s", node.Addr, addr)
 
@@ -557,11 +553,13 @@ func (node *Node) Quit() {
 	logrus.Infof("Quit %s", node.Addr)
 	node.online = false
 	var empty string
+	logrus.Info("haha")
 	suc := node.getSuccessor()
 	err := node.RemoteCall(suc.Addr, "Node.Notify", "", &empty)
 	if err != nil {
 		logrus.Errorf("[Quit] [%s] fail to RemoteCall %s to <Notify> err: %s", node.Addr, suc.Addr, err)
 	}
+	logrus.Info("hehe")
 	pre := node.getPredecessor()
 	err = node.RemoteCall(pre.Addr, "Node.Stabilize", "", &empty)
 	if err != nil {
@@ -678,15 +676,15 @@ func (node *Node) getPredecessor() NodeInf {
 }
 
 func (node *Node) getSuccessor() NodeInf {
-	logrus.Infof("[getSuccessor] [%s] in", node.Addr)
+	//logrus.Infof("[getSuccessor] [%s] in", node.Addr)
 	for i := 0; i < kSuccessorListSize; i++ {
 		node.successorListLock.RLock()
 		suc := node.successorList[i]
 		node.successorListLock.RUnlock()
 		var empty string
 		if node.Ping(suc.Addr, &empty) == nil {
-			logrus.Infof("[getSuccessor] get [%s]'s successor %s", node.Addr, suc.Addr)
-			logrus.Infof("[getSuccessor] [%s] out", node.Addr)
+			// logrus.Infof("[getSuccessor] get [%s]'s successor %s", node.Addr, suc.Addr)
+			//logrus.Infof("[getSuccessor] [%s] out", node.Addr)
 			return suc
 		}
 	}
@@ -708,7 +706,7 @@ func (node *Node) getSuccessor() NodeInf {
 // }
 
 func (node *Node) closestPrecedingFinger(id *big.Int) NodeInf {
-	logrus.Infof("[closestPrecedingFinger] [%s] in", node.Addr)
+	//logrus.Infof("[closestPrecedingFinger] [%s] in", node.Addr)
 	for i := kFingerTableSize - 1; i >= 0; i-- {
 		node.fingerTableLock.RLock()
 		fin := node.fingerTable[i]
@@ -718,19 +716,19 @@ func (node *Node) closestPrecedingFinger(id *big.Int) NodeInf {
 		}
 		var empty string
 		if node.Ping(fin.Addr, &empty) != nil {
-			fin.Addr = ""
+			node.fingerTableLock.Lock()
+			node.fingerTable[i] = NodeInf{}
+			node.fingerTableLock.Unlock()
 			continue
 		}
 		if Contain(fin.Identify, node.Identify, id) {
-			logrus.Infof("[closestPrecedingFinger] [%s] out", node.Addr)
+			//logrus.Infof("[closestPrecedingFinger] [%s] out", node.Addr)
 			return NodeInf{fin.Addr, Hash(fin.Addr)}
 		}
-		// if i%10 == 0 {
-		// 	logrus.Infof("%v", i)
-		// }
 	}
-	logrus.Infof("[closestPrecedingFinger] [%s] out", node.Addr)
-	return node.getSuccessor()
+	// logrus.Infof("[closestPrecedingFinger] [%s] out", node.Addr)
+	//return node.getSuccessor()
+	return NodeInf{node.Addr,node.Identify}
 }
 
 func (node *Node) absorbBackups() {

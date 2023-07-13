@@ -9,6 +9,7 @@ import (
 
 const kSuccessorListSize = 8
 const kFingerTableSize = 160 // sha1算法输出160bit
+// const kFingerTableSize = 10 // sha1算法输出160bit
 
 var(
 	interval=2*time.Second
@@ -19,7 +20,6 @@ func Hash(s string) *big.Int {
 	h.Write([]byte(s))
 	hash := new(big.Int)
 	hash.SetBytes(h.Sum(nil))
-
 	return hash
 }
 
