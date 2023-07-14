@@ -11,7 +11,8 @@ const kSuccessorListSize = 8
 const kFingerTableSize = 160 // sha1算法输出160bit
 
 var (
-	interval = time.Second
+	emitInterval = 500 * time.Millisecond
+	updateInterval = 100 * time.Millisecond
 )
 
 func Hash(s string) *big.Int {

@@ -85,7 +85,7 @@ func (node *Node) RemoteCall(addr string, method string, args interface{}, reply
 	}
 
 	// Note: Here we use DialTimeout to set a timeout of 10 seconds.
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second) // 10
+	conn, err := net.DialTimeout("tcp", addr, emitInterval) // 10
 	if err != nil {
 		logrus.Errorf("[RemoteCall] [%s] dialing %s error:%s", node.Addr, addr, err)
 		return err
@@ -805,19 +805,19 @@ func (node *Node) update() {
 	go func() {
 		for node.online {
 			node.Stabilize("", &empty)
-			time.Sleep(interval)
+			time.Sleep(updateInterval)
 		}
 	}()
 	go func() {
 		for node.online {
 			node.fixFingers()
-			time.Sleep(interval)
+			time.Sleep(updateInterval)
 		}
 	}()
 	go func() {
 		for node.online {
 			node.Notify("", &empty)
-			time.Sleep(interval)
+			time.Sleep(updateInterval)
 		}
 	}()
 }
