@@ -87,7 +87,7 @@ func (node *Node) RemoteCall(addr string, method string, args interface{}, reply
 	// Note: Here we use DialTimeout to set a timeout of 10 seconds.
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second) // 10
 	if err != nil {
-		logrus.Errorf("[RemoteCall] [%s] dialing %s error:%s", node.Addr,addr, err)
+		logrus.Errorf("[RemoteCall] [%s] dialing %s error:%s", node.Addr, addr, err)
 		return err
 	}
 	client := rpc.NewClient(conn)
@@ -390,7 +390,7 @@ func (node *Node) Notify(arg string, _ *string) error {
 	pre := node.getPredecessor()
 	var empty string
 	if arg == "" {
-		if pre.Addr != "" && node.Ping(pre.Addr, &empty) != nil {
+		if pre.Addr != "" && !node.ping(pre.Addr) {
 			node.predecessorLock.Lock()
 			node.predecessor = NodeInf{}
 			node.predecessorLock.Unlock()
@@ -406,7 +406,7 @@ func (node *Node) Notify(arg string, _ *string) error {
 			node.backupLock.Unlock()
 		}
 	} else {
-		if (node.Ping(arg, &empty) == nil) && (pre.Addr == "" || Contain(Hash(arg), pre.Identify, node.Identify)) {
+		if node.ping(arg) && (pre.Addr == "" || Contain(Hash(arg), pre.Identify, node.Identify)) {
 			node.predecessorLock.Lock()
 			node.predecessor = NodeInf{arg, Hash(arg)}
 			node.predecessorLock.Unlock()
@@ -601,11 +601,19 @@ func (node *Node) ForceQuit() {
 	node.onlineLock.Unlock()
 	node.quitChan = make(chan bool, 1)
 	node.clear()
-	logrus.Infof("[ForceQuit] [%s] success with %v", node.Addr,node.online)
+	logrus.Infof("[ForceQuit] [%s] success with %v", node.Addr, node.online)
 }
 
 // Check whether the node identified by addr is in the network.
-// Ping(addr string) bool
+func (node *Node) ping(addr string) bool {
+	var empty string
+	err := node.RemoteCall(addr, "Node.Ping", "", &empty)
+	if err == nil {
+		return true
+	} else {
+		return false
+	}
+}
 
 // Put a key-value pair into the network (if key exists, update the value).
 // Return "true" if success, "false" otherwise.
@@ -703,8 +711,8 @@ func (node *Node) getSuccessor() NodeInf {
 		node.successorListLock.RLock()
 		suc := node.successorList[i]
 		node.successorListLock.RUnlock()
-		var empty string
-		if node.Ping(suc.Addr, &empty) == nil {
+		// var empty string
+		if node.ping(suc.Addr) {
 			// logrus.Infof("[getSuccessor] get [%s]'s successor %s", node.Addr, suc.Addr)
 			//logrus.Infof("[getSuccessor] [%s] out", node.Addr)
 			return suc
@@ -736,8 +744,8 @@ func (node *Node) closestPrecedingFinger(id *big.Int) NodeInf {
 		if fin.Addr == "" {
 			continue
 		}
-		var empty string
-		if node.Ping(fin.Addr, &empty) != nil {
+		// var empty string
+		if !node.ping(fin.Addr) {
 			node.fingerTableLock.Lock()
 			node.fingerTable[i] = NodeInf{}
 			node.fingerTableLock.Unlock()
