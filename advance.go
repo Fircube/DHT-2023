@@ -88,7 +88,7 @@ func forceQuitTest() (bool, int, int) {
 		for i := 1; i <= forceQuitRoundQuitNodeSize; i++ {
 			idxInArray := rand.Intn(len(nodesInNetwork))
 
-			nodes[nodesInNetwork[idxInArray]].ForceQuit()
+			nodes[nodesInNetwork[idxInArray]].Quit()
 			nodesInNetwork = removeFromArray(nodesInNetwork, idxInArray)
 
 			time.Sleep(forceQuitFQSleepTime)

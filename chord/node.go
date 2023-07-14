@@ -200,11 +200,6 @@ func (node *Node) TransferData(objectInf NodeInf, objectData *map[string]string)
 		logrus.Errorf("[TransferData] [%s] fail to RemoteCall %s to <DeleteBackups> err: %s", node.Addr, suc.Addr, err)
 		return fmt.Errorf("[TransferData] [%s] fail to RemoteCall %s to <DeleteBackups>", node.Addr, suc.Addr)
 	}
-	// err = node.RemoteCall(objectInf.Addr, "Node.PutBackups", preBackup, &empty)
-	// if err != nil {
-	// 	logrus.Errorf("[TransferData] [%s] fail to RemoteCall %s to <PutBackups> err: %s", node.Addr, objectInf.Addr, err)
-	// 	return fmt.Errorf("[TransferData] [%s] fail to RemoteCall %s to <PutBackups>", node.Addr, objectInf.Addr)
-	// }
 	node.predecessorLock.Lock()
 	node.predecessor = objectInf
 	node.predecessorLock.Unlock()
@@ -562,9 +557,7 @@ func (node *Node) Quit() {
 	if err != nil {
 		logrus.Errorf("[Quit] [%s] fail to RemoteCall %s to <Notify> err: %s", node.Addr, suc.Addr, err)
 	}
-	logrus.Info("hehe")
 	pre := node.getPredecessor()
-	logrus.Info("hoho")
 	err = node.RemoteCall(pre.Addr, "Node.Stabilize", "", &empty)
 	if err != nil {
 		logrus.Errorf("[Quit] [%s] fail to RemoteCall %s to <Stabilize> err: %s", node.Addr, suc.Addr, err)
@@ -706,15 +699,12 @@ func (node *Node) getPredecessor() NodeInf {
 }
 
 func (node *Node) getSuccessor() NodeInf {
-	//logrus.Infof("[getSuccessor] [%s] in", node.Addr)
 	for i := 0; i < kSuccessorListSize; i++ {
 		node.successorListLock.RLock()
 		suc := node.successorList[i]
 		node.successorListLock.RUnlock()
-		// var empty string
 		if node.ping(suc.Addr) {
 			// logrus.Infof("[getSuccessor] get [%s]'s successor %s", node.Addr, suc.Addr)
-			//logrus.Infof("[getSuccessor] [%s] out", node.Addr)
 			return suc
 		}
 	}
@@ -736,7 +726,6 @@ func (node *Node) getSuccessor() NodeInf {
 // }
 
 func (node *Node) closestPrecedingFinger(id *big.Int) NodeInf {
-	//logrus.Infof("[closestPrecedingFinger] [%s] in", node.Addr)
 	for i := kFingerTableSize - 1; i >= 0; i-- {
 		node.fingerTableLock.RLock()
 		fin := node.fingerTable[i]
@@ -744,7 +733,6 @@ func (node *Node) closestPrecedingFinger(id *big.Int) NodeInf {
 		if fin.Addr == "" {
 			continue
 		}
-		// var empty string
 		if !node.ping(fin.Addr) {
 			node.fingerTableLock.Lock()
 			node.fingerTable[i] = NodeInf{}
@@ -752,26 +740,11 @@ func (node *Node) closestPrecedingFinger(id *big.Int) NodeInf {
 			continue
 		}
 		if Contain(fin.Identify, node.Identify, id) {
-			//logrus.Infof("[closestPrecedingFinger] [%s] out", node.Addr)
 			return NodeInf{fin.Addr, Hash(fin.Addr)}
 		}
 	}
-	// logrus.Infof("[closestPrecedingFinger] [%s] out", node.Addr)
-	//return node.getSuccessor()
 	return NodeInf{node.Addr, node.Identify}
 }
-
-// func(node *Node) clear(){
-// 	node.Addr=""
-// 	node.Identify=new(big.Int)
-// 	node.online=false
-// 	node.dataLock.Lock()
-// 	node.data=make(map[string]string)
-// 	node.dataLock.Unlock()
-// 	node.backupLock.Lock()
-// 	node.backup=make(map[string]string)
-// 	node.backupLock.Unlock()
-// }
 
 func (node *Node) absorbBackups() {
 	// if !node.online {
