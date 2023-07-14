@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	f, _ := os.Create("chord-dht-test.log")
+	f, _ := os.Create("dht-chord-test.log")
 	logrus.SetOutput(f)
 }
 
@@ -28,12 +28,14 @@ type NodeInf struct {
 }
 
 type Node struct {
-	Addr     string   // addr:port
-	Identify *big.Int // Hash(Address) -> Chord Identifier
-	online   bool
+	Addr       string   // addr:port
+	Identify   *big.Int // Hash(Address) -> Chord Identifier
+	online     bool
+	onlineLock sync.RWMutex
 
 	listener net.Listener
 	server   *rpc.Server
+	quitChan chan bool
 
 	predecessor       NodeInf
 	predecessorLock   sync.RWMutex
@@ -52,7 +54,10 @@ type Node struct {
 // Initialize a node.
 // Addr is the address and port number of the node, e.g., "localhost:1234".
 func (node *Node) Init(addr string) {
+	node.onlineLock.Lock()
 	node.online = false
+	node.onlineLock.Unlock()
+	node.quitChan = make(chan bool, 1)
 
 	node.Addr = addr
 	node.Identify = Hash(addr)
@@ -65,35 +70,6 @@ func (node *Node) Init(addr string) {
 	node.backup = make(map[string]string)
 	node.backupLock.Unlock()
 	// logrus.Infof("[Init] [%s] is inited", addr)
-}
-
-func (node *Node) RunRPCServer() {
-	node.server = rpc.NewServer()
-	err := node.server.Register(node)
-	if err != nil {
-		logrus.Errorf("[RunRPCServer] [%s] Register error:%s", node.Addr, err)
-		return
-	}
-
-	node.listener, err = net.Listen("tcp", node.Addr)
-	if err != nil {
-		logrus.Fatal("listen error: ", err)
-	}
-
-	for node.online {
-		conn, err := node.listener.Accept()
-		if err != nil {
-			logrus.Errorf("[RunRPCServer] [%s] accept error:%s", node.Addr, err)
-			return
-		}
-		go node.server.ServeConn(conn)
-	}
-}
-
-func (node *Node) StopRPCServer() {
-	node.online = false
-	node.listener.Close()
-	logrus.Infof("[StopRPCServer] [%s] stopped RPC server", node.Addr)
 }
 
 // RemoteCall calls the RPC method at addr.
@@ -109,9 +85,9 @@ func (node *Node) RemoteCall(addr string, method string, args interface{}, reply
 	}
 
 	// Note: Here we use DialTimeout to set a timeout of 10 seconds.
-	conn, err := net.DialTimeout("tcp", addr, 10*time.Second) // 10
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second) // 10
 	if err != nil {
-		logrus.Errorf("[RemoteCall] [%s] dialing error:%s", node.Addr, err)
+		logrus.Errorf("[RemoteCall] [%s] dialing %s error:%s", node.Addr,addr, err)
 		return err
 	}
 	client := rpc.NewClient(conn)
@@ -119,7 +95,6 @@ func (node *Node) RemoteCall(addr string, method string, args interface{}, reply
 	err = client.Call(method, args, reply)
 	if err != nil {
 		logrus.Errorf("[RemoteCall] [%s] client calling %s %s %s error:%s", node.Addr, method, args, reply, err)
-		return err
 	}
 	return nil
 }
@@ -143,10 +118,10 @@ func (node *Node) Ping(objectAddr string, _ *string) error {
 
 // get
 func (node *Node) GetData(_ string, reply *map[string]string) error {
-	if !node.online {
-		logrus.Errorf("[GetData] [%s] is offline", node.Addr)
-		return fmt.Errorf("[GetData] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[GetData] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[GetData] [%s] is offline", node.Addr)
+	// }
 	node.dataLock.RLock()
 	*reply = node.data
 	node.dataLock.RUnlock()
@@ -154,10 +129,10 @@ func (node *Node) GetData(_ string, reply *map[string]string) error {
 }
 
 func (node *Node) GetPredecessor(_ string, reply *NodeInf) error {
-	if !node.online {
-		logrus.Errorf("[GetPredecessor] [%s] is offline", node.Addr)
-		return fmt.Errorf("[GetPredecessor] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[GetPredecessor] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[GetPredecessor] [%s] is offline", node.Addr)
+	// }
 	*reply = node.getPredecessor()
 	return nil
 }
@@ -175,10 +150,10 @@ func (node *Node) GetSuccessorList(_ string, reply *[kSuccessorListSize]NodeInf)
 
 // adjust pre/suc
 func (node *Node) FindSuccessor(arg NodeInf, reply *NodeInf) error {
-	if !node.online {
-		logrus.Errorf("[FindSuccessor] [%s] is offline", node.Addr)
-		return fmt.Errorf("[FindSuccessor] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[FindSuccessor] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[FindSuccessor] [%s] is offline", node.Addr)
+	// }
 	suc := node.getSuccessor()
 	if suc.Addr == "" {
 		logrus.Errorf("[FindSuccessor] fail to get [%s] 's successor", node.Addr)
@@ -199,17 +174,17 @@ func (node *Node) FindSuccessor(arg NodeInf, reply *NodeInf) error {
 
 // adjust Data/Backup
 func (node *Node) TransferData(objectInf NodeInf, objectData *map[string]string) error {
-	if !node.online {
-		logrus.Errorf("[TransferData] [%s] is offline", node.Addr)
-		return fmt.Errorf("[TransferData] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[TransferData] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[TransferData] [%s] is offline", node.Addr)
+	// }
 	node.dataLock.Lock()
 	node.backupLock.Lock()
 	// preBackup := node.backup
 	node.backup = make(map[string]string)
 	for key, value := range node.data {
 		keyId := Hash(key)
-		if (keyId != node.Identify) && !(Contain(keyId, objectInf.Identify, node.Identify)) {
+		if (keyId.Cmp(node.Identify) != 0) && !(Contain(keyId, objectInf.Identify, node.Identify)) {
 			(*objectData)[key] = value
 			delete(node.data, key)
 			node.backup[key] = value
@@ -217,6 +192,7 @@ func (node *Node) TransferData(objectInf NodeInf, objectData *map[string]string)
 	}
 	node.dataLock.Unlock()
 	node.backupLock.Unlock()
+
 	var empty string
 	suc := node.getSuccessor()
 	err := node.RemoteCall(suc.Addr, "Node.DeleteBackups", *objectData, &empty)
@@ -236,10 +212,10 @@ func (node *Node) TransferData(objectInf NodeInf, objectData *map[string]string)
 }
 
 func (node *Node) PutBackup(pair Pair, _ *string) error {
-	if !node.online {
-		logrus.Errorf("[PutBackup] [%s] is offline", node.Addr)
-		return fmt.Errorf("[PutBackup] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[PutBackup] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[PutBackup] [%s] is offline", node.Addr)
+	// }
 	node.backupLock.Lock()
 	node.backup[pair.Key] = pair.Value
 	node.backupLock.Unlock()
@@ -247,10 +223,10 @@ func (node *Node) PutBackup(pair Pair, _ *string) error {
 }
 
 func (node *Node) PutBackups(objectData map[string]string, _ *string) error {
-	if !node.online {
-		logrus.Errorf("[PutBackups] [%s] is offline", node.Addr)
-		return fmt.Errorf("[PutBackups] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[PutBackups] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[PutBackups] [%s] is offline", node.Addr)
+	// }
 	node.backupLock.Lock()
 	for key, value := range objectData {
 		node.backup[key] = value
@@ -260,10 +236,10 @@ func (node *Node) PutBackups(objectData map[string]string, _ *string) error {
 }
 
 func (node *Node) DeleteBackup(key string, _ *string) error {
-	if !node.online {
-		logrus.Errorf("[DeleteBackup] [%s] is offline", node.Addr)
-		return fmt.Errorf("[DeleteBackup] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[DeleteBackup] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[DeleteBackup] [%s] is offline", node.Addr)
+	// }
 	node.backupLock.Lock()
 	_, ok := node.backup[key]
 	if ok {
@@ -277,15 +253,13 @@ func (node *Node) DeleteBackup(key string, _ *string) error {
 }
 
 func (node *Node) DeleteBackups(objectData map[string]string, _ *string) error {
-	if !node.online {
-		logrus.Errorf("[DeleteBackups] [%s] is offline", node.Addr)
-		return fmt.Errorf("[DeleteBackups] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[DeleteBackups] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[DeleteBackups] [%s] is offline", node.Addr)
+	// }
 	node.backupLock.Lock()
 	for key := range objectData {
 		_, ok := node.backup[key]
-		logrus.Info("hihi")
-
 		if ok {
 			delete(node.backup, key)
 		} else {
@@ -299,10 +273,10 @@ func (node *Node) DeleteBackups(objectData map[string]string, _ *string) error {
 
 // adjust value
 func (node *Node) PutValue(pair Pair, _ *string) error {
-	if !node.online {
-		logrus.Errorf("[PutValue] [%s] is offline", node.Addr)
-		return fmt.Errorf("[PutValue] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[PutValue] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[PutValue] [%s] is offline", node.Addr)
+	// }
 	node.dataLock.Lock()
 	node.data[pair.Key] = pair.Value
 	node.dataLock.Unlock()
@@ -318,10 +292,10 @@ func (node *Node) PutValue(pair Pair, _ *string) error {
 }
 
 func (node *Node) GetValue(key string, value *string) error {
-	if !node.online {
-		logrus.Errorf("[GetValue] [%s] is offline", node.Addr)
-		return fmt.Errorf("[GetValue] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[GetValue] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[GetValue] [%s] is offline", node.Addr)
+	// }
 	node.dataLock.RLock()
 	var ok bool
 	_, ok = node.data[key]
@@ -330,16 +304,17 @@ func (node *Node) GetValue(key string, value *string) error {
 		*value = node.data[key]
 		return nil
 	} else {
+		*value = ""
 		logrus.Errorf("[GetValue] [%s] fail to find key:%s", node.Addr, key)
 		return fmt.Errorf("[GetValue] [%s] fail to find key:%s", node.Addr, key)
 	}
 }
 
 func (node *Node) DeleteValue(key string, _ *string) error {
-	if !node.online {
-		logrus.Errorf("[DeleteValue] [%s] is offline", node.Addr)
-		return fmt.Errorf("[DeleteValue] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[DeleteValue] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[DeleteValue] [%s] is offline", node.Addr)
+	// }
 	node.dataLock.RLock()
 	_, ok := node.data[key]
 	node.dataLock.RUnlock()
@@ -363,10 +338,10 @@ func (node *Node) DeleteValue(key string, _ *string) error {
 
 // periodly update
 func (node *Node) Stabilize(_ string, _ *string) error {
-	if !node.online {
-		logrus.Errorf("[Stabilize] [%s] is offline", node.Addr)
-		return fmt.Errorf("[Stabilize] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[Stabilize] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[Stabilize] [%s] is offline", node.Addr)
+	// }
 	// logrus.Infof("[Stabilize] [%s] start to stabilize",node.Addr)
 	suc := node.getSuccessor()
 	var sucPre NodeInf
@@ -408,10 +383,10 @@ func (node *Node) Stabilize(_ string, _ *string) error {
 }
 
 func (node *Node) Notify(arg string, _ *string) error {
-	if !node.online {
-		logrus.Errorf("[Notify] [%s] is offline", node.Addr)
-		return fmt.Errorf("[Notify] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[Notify] [%s] is offline", node.Addr)
+	// 	return fmt.Errorf("[Notify] [%s] is offline", node.Addr)
+	// }
 	pre := node.getPredecessor()
 	var empty string
 	if arg == "" {
@@ -421,11 +396,14 @@ func (node *Node) Notify(arg string, _ *string) error {
 			node.predecessorLock.Unlock()
 			node.absorbBackups()
 			suc := node.getSuccessor()
-			err := node.RemoteCall(suc.Addr, "Node.PutBackups", node.data, &empty)
+			err := node.RemoteCall(suc.Addr, "Node.PutBackups", node.backup, &empty)
 			if err != nil {
 				logrus.Errorf("[Notify] [%s] fail to RemoteCall %s to <PutBackups> err: %s", node.Addr, suc.Addr, err)
 				return fmt.Errorf("[Notify] [%s] fail to RemoteCall %s to <PutBackups>", node.Addr, suc.Addr)
 			}
+			node.backupLock.Lock()
+			node.backup = make(map[string]string)
+			node.backupLock.Unlock()
 		}
 	} else {
 		if (node.Ping(arg, &empty) == nil) && (pre.Addr == "" || Contain(Hash(arg), pre.Identify, node.Identify)) {
@@ -440,7 +418,10 @@ func (node *Node) Notify(arg string, _ *string) error {
 				return fmt.Errorf("[Notify] [%s] fail to RemoteCall %s to <GetData>", node.Addr, arg)
 			}
 			node.backupLock.Lock()
-			node.backup = data
+			node.backup = make(map[string]string)
+			for k, v := range data {
+				(node.backup)[k] = v
+			}
 			node.backupLock.Unlock()
 		}
 	}
@@ -453,8 +434,38 @@ func (node *Node) Notify(arg string, _ *string) error {
 
 // "Run" is called after calling "NewNode". You can do some initialization works here.
 func (node *Node) Run() {
+	node.server = rpc.NewServer()
+	err := node.server.Register(node)
+	if err != nil {
+		logrus.Errorf("[RunRPCServer] [%s] Register error:%s", node.Addr, err)
+		return
+	}
+
+	node.listener, err = net.Listen("tcp", node.Addr)
+	if err != nil {
+		logrus.Fatal("listen error: ", err)
+	}
+	logrus.Infof("[Run] %s ", node.Addr)
+	go func() {
+		for node.online {
+			select {
+			case <-node.quitChan:
+				logrus.Infof("[StopRPCServer] [%s] stopped RPC server", node.Addr)
+				return
+			default:
+				conn, err := node.listener.Accept()
+				if err != nil {
+					logrus.Errorf("[RunRPCServer] [%s] accept error:%s", node.Addr, err)
+					return
+				}
+				go node.server.ServeConn(conn)
+			}
+		}
+		logrus.Infof("[StopRPCServer] [%s] stopped RPC server", node.Addr)
+	}()
+	node.onlineLock.Lock()
+	defer node.onlineLock.Unlock()
 	node.online = true
-	go node.RunRPCServer()
 }
 
 // "Create" or "Join" will be called after calling "Run".
@@ -462,7 +473,6 @@ func (node *Node) Run() {
 
 // Create a new network.
 func (node *Node) Create() {
-	node.online = true
 	logrus.Infof("[Create] [%s]", node.Addr)
 	nodeId := NodeInf{node.Addr, node.Identify}
 
@@ -472,22 +482,14 @@ func (node *Node) Create() {
 
 	node.fingerTableLock.Lock()
 	node.fingerTable[0] = nodeId
-	// for i := 0; i < kFingerTableSize; i++ {
-	// 	node.fingerTable[i] = nodeId
-	// }
 	node.fingerTableLock.Unlock()
 
-	node.nxtFin = 0
+	node.nxtFin = 1
 	node.update()
 }
 
 // Join an existing network. Return "true" if join succeeded and "false" if not.
 func (node *Node) Join(addr string) bool {
-	//  if node.online {
-	//  	logrus.Errorf("[Join] [%s] has already joined %s", node.Addr, addr)
-	//  	return false
-	//  }
-	node.online = true
 	logrus.Infof("[Join] join [%s] to %s", node.Addr, addr)
 
 	var suc NodeInf
@@ -496,6 +498,10 @@ func (node *Node) Join(addr string) bool {
 		logrus.Errorf("[Join] [%s] fail to RemoteCall %s to <FindSuccessor> err: %s", node.Addr, addr, err)
 		return false
 	}
+
+	node.predecessorLock.Lock()
+	node.predecessor = NodeInf{}
+	node.predecessorLock.Unlock()
 
 	var sucSucList [kSuccessorListSize]NodeInf
 	err = node.RemoteCall(suc.Addr, "Node.GetSuccessorList", "", &sucSucList)
@@ -528,9 +534,7 @@ func (node *Node) Join(addr string) bool {
 	node.fingerTableLock.Unlock()
 	node.nxtFin = 1
 
-	node.dataLock.Lock()
 	err = node.RemoteCall(suc.Addr, "Node.TransferData", NodeInf{node.Addr, node.Identify}, &node.data)
-	node.dataLock.Unlock()
 	if err != nil {
 		logrus.Errorf("[Join] [%s] fail to RemoteCall %s to <TransferData> err: %s", node.Addr, suc.Addr, err)
 		return false
@@ -545,15 +549,14 @@ func (node *Node) Join(addr string) bool {
 // "Quit" will not be called before "Create" or "Join".
 // For a dhtNode, "Quit" may be called for many times.
 // For a quited node, call "Quit" again should have no effect.
+
 func (node *Node) Quit() {
 	if !node.online {
 		logrus.Warnf("[Quit] [%s] is offline", node.Addr)
 		return
 	}
 	logrus.Infof("Quit %s", node.Addr)
-	node.online = false
 	var empty string
-	logrus.Info("haha")
 	suc := node.getSuccessor()
 	err := node.RemoteCall(suc.Addr, "Node.Notify", "", &empty)
 	if err != nil {
@@ -561,12 +564,23 @@ func (node *Node) Quit() {
 	}
 	logrus.Info("hehe")
 	pre := node.getPredecessor()
+	logrus.Info("hoho")
 	err = node.RemoteCall(pre.Addr, "Node.Stabilize", "", &empty)
 	if err != nil {
 		logrus.Errorf("[Quit] [%s] fail to RemoteCall %s to <Stabilize> err: %s", node.Addr, suc.Addr, err)
 	}
-	// clear?
-	node.StopRPCServer()
+	logrus.Infof("[Quit] %s", node.Addr)
+	node.quitChan <- true
+	err = node.listener.Close()
+	if err != nil {
+		logrus.Errorf("[Quit] [%s] error: %s", node.Addr, err)
+	}
+	node.onlineLock.Lock()
+	node.online = false
+	node.onlineLock.Unlock()
+	node.quitChan = make(chan bool, 1)
+	node.clear()
+	logrus.Infof("[Quit] [%s] success", node.Addr)
 }
 
 // Quit the network without informing other nodes.
@@ -576,10 +590,18 @@ func (node *Node) ForceQuit() {
 		logrus.Warnf("[ForceQuit] [%s] is offline", node.Addr)
 		return
 	}
-	logrus.Info("ForceQuit")
+	logrus.Infof("[ForceQuit] %s", node.Addr)
+	node.quitChan <- true
+	err := node.listener.Close()
+	if err != nil {
+		logrus.Errorf("[ForceQuit] [%s] error: %s", node.Addr, err)
+	}
+	node.onlineLock.Lock()
 	node.online = false
-	// clear?
-	node.StopRPCServer()
+	node.onlineLock.Unlock()
+	node.quitChan = make(chan bool, 1)
+	node.clear()
+	logrus.Infof("[ForceQuit] [%s] success with %v", node.Addr,node.online)
 }
 
 // Check whether the node identified by addr is in the network.
@@ -588,11 +610,11 @@ func (node *Node) ForceQuit() {
 // Put a key-value pair into the network (if key exists, update the value).
 // Return "true" if success, "false" otherwise.
 func (node *Node) Put(key string, value string) bool {
-	if !node.online {
-		logrus.Errorf("[Put] [%s] is offline", node.Addr)
-		return false
-	}
-	logrus.Infof("[Put] key:%s value:%s", key, value)
+	// if !node.online {
+	// 	logrus.Errorf("[Put] [%s] is offline", node.Addr)
+	// 	return false
+	// }
+	// logrus.Infof("[Put] key:%s value:%s", key, value)
 	var tar NodeInf
 	err := node.FindSuccessor(NodeInf{key, Hash(key)}, &tar)
 	if err != nil {
@@ -611,11 +633,11 @@ func (node *Node) Put(key string, value string) bool {
 // Get a key-value pair from the network.
 // Return "true" and the value if success, "false" otherwise.
 func (node *Node) Get(key string) (bool, string) {
-	if !node.online {
-		logrus.Errorf("[Get] [%s] is offline", node.Addr)
-		return false, ""
-	}
-	logrus.Infof("[Get] key:%s", key)
+	// if !node.online {
+	// 	logrus.Errorf("[Get] [%s] is offline", node.Addr)
+	// 	return false, ""
+	// }
+	// logrus.Infof("[Get] key:%s", key)
 	var tar NodeInf
 	err := node.FindSuccessor(NodeInf{key, Hash(key)}, &tar)
 	if err != nil {
@@ -634,10 +656,10 @@ func (node *Node) Get(key string) (bool, string) {
 // Remove a key-value pair identified by KEY from the network.
 // Return "true" if success, "false" otherwise.
 func (node *Node) Delete(key string) bool {
-	if !node.online {
-		logrus.Errorf("[Delete] [%s] is offline", node.Addr)
-		return false
-	}
+	// if !node.online {
+	// logrus.Errorf("[Delete] [%s] is offline", node.Addr)
+	// return false
+	// }
 	logrus.Infof("[Delete] key:%s", key)
 	var tar NodeInf
 	err := node.FindSuccessor(NodeInf{key, Hash(key)}, &tar)
@@ -728,13 +750,25 @@ func (node *Node) closestPrecedingFinger(id *big.Int) NodeInf {
 	}
 	// logrus.Infof("[closestPrecedingFinger] [%s] out", node.Addr)
 	//return node.getSuccessor()
-	return NodeInf{node.Addr,node.Identify}
+	return NodeInf{node.Addr, node.Identify}
 }
 
+// func(node *Node) clear(){
+// 	node.Addr=""
+// 	node.Identify=new(big.Int)
+// 	node.online=false
+// 	node.dataLock.Lock()
+// 	node.data=make(map[string]string)
+// 	node.dataLock.Unlock()
+// 	node.backupLock.Lock()
+// 	node.backup=make(map[string]string)
+// 	node.backupLock.Unlock()
+// }
+
 func (node *Node) absorbBackups() {
-	if !node.online {
-		logrus.Errorf("[AbsorbBackups] [%s] is offline", node.Addr)
-	}
+	// if !node.online {
+	// 	logrus.Errorf("[AbsorbBackups] [%s] is offline", node.Addr)
+	// }
 	node.dataLock.Lock()
 	node.backupLock.Lock()
 	for key, value := range node.backup {
@@ -746,6 +780,15 @@ func (node *Node) absorbBackups() {
 		}
 	}
 	node.dataLock.Unlock()
+	node.backupLock.Unlock()
+}
+
+func (node *Node) clear() {
+	node.dataLock.Lock()
+	node.data = make(map[string]string)
+	node.dataLock.Unlock()
+	node.backupLock.Lock()
+	node.backup = make(map[string]string)
 	node.backupLock.Unlock()
 }
 
