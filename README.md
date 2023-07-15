@@ -62,5 +62,3 @@ The current test procedure is:
 * Next, **every node will quit from the network**:
   1. One node quits.
   2. After the node quitting from the network, there is **80ms of sleep time**. And then **20 key-value pairs will be queried for**.
-
-# DHT-2023
