@@ -226,6 +226,7 @@ func (node *Node) DeleteBackup(key string, _ *string) error {
 		return fmt.Errorf("[DeleteBackup] [%s] is offline", node.Addr)
 	}
 	node.backupLock.Lock()
+	defer node.backupLock.Unlock()
 	_, ok := node.backup[key]
 	if ok {
 		delete(node.backup, key)
@@ -233,7 +234,6 @@ func (node *Node) DeleteBackup(key string, _ *string) error {
 		logrus.Errorf("[DeleteBackup] [%s] do not have %s in backup", node.Addr, key)
 		return fmt.Errorf("[DeleteBackup] [%s] do not have %s in backup", node.Addr, key)
 	}
-	node.backupLock.Unlock()
 	return nil
 }
 
@@ -243,6 +243,7 @@ func (node *Node) DeleteBackups(objectData map[string]string, _ *string) error {
 		return fmt.Errorf("[DeleteBackups] [%s] is offline", node.Addr)
 	}
 	node.backupLock.Lock()
+	defer node.backupLock.Unlock()
 	for key := range objectData {
 		_, ok := node.backup[key]
 		if ok {
@@ -252,7 +253,6 @@ func (node *Node) DeleteBackups(objectData map[string]string, _ *string) error {
 			return fmt.Errorf("[DeleteBackups] [%s] do not have %s in backup", node.Addr, key)
 		}
 	}
-	node.backupLock.Unlock()
 	return nil
 }
 
@@ -282,9 +282,9 @@ func (node *Node) GetValue(key string, value *string) error {
 		return fmt.Errorf("[GetValue] [%s] is offline", node.Addr)
 	}
 	node.dataLock.RLock()
+	defer node.dataLock.RUnlock()
 	var ok bool
 	_, ok = node.data[key]
-	node.dataLock.RUnlock()
 	if ok {
 		*value = node.data[key]
 		return nil
@@ -403,10 +403,7 @@ func (node *Node) Notify(arg string, _ *string) error {
 				return fmt.Errorf("[Notify] [%s] fail to RemoteCall %s to <GetData>", node.Addr, arg)
 			}
 			node.backupLock.Lock()
-			node.backup = make(map[string]string)
-			for k, v := range data {
-				(node.backup)[k] = v
-			}
+			node.backup = data
 			node.backupLock.Unlock()
 		}
 	}
@@ -562,8 +559,6 @@ func (node *Node) Quit() {
 	if err != nil {
 		logrus.Errorf("[Quit] [%s] fail to RemoteCall %s to <Stabilize> err: %s", node.Addr, suc.Addr, err)
 	}
-	logrus.Infof("[Quit] %s", node.Addr)
-
 	logrus.Infof("[Quit] [%s] success", node.Addr)
 }
 

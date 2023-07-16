@@ -11,7 +11,7 @@ const kSuccessorListSize = 8
 const kFingerTableSize = 160 // sha1算法输出160bit
 
 var (
-	emitInterval = 500 * time.Millisecond
+	emitInterval = 1 * time.Second
 	updateInterval = 100 * time.Millisecond
 )
 
