@@ -208,10 +208,10 @@ func (node *Node) PutBackup(pair Pair, _ *string) error {
 }
 
 func (node *Node) PutBackups(objectData map[string]string, _ *string) error {
-	// if !node.online {
-	// 	logrus.Errorf("[PutBackups] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[PutBackups] [%s] is offline", node.Addr)
-	// }
+	if !node.online {
+		logrus.Errorf("[PutBackups] [%s] is offline", node.Addr)
+		return fmt.Errorf("[PutBackups] [%s] is offline", node.Addr)
+	}
 	node.backupLock.Lock()
 	for key, value := range objectData {
 		node.backup[key] = value
@@ -414,7 +414,7 @@ func (node *Node) Notify(arg string, _ *string) error {
 // DHT methods for interfaces
 //
 
-// "Run" is called after calling "NewNode". You can do some initialization works here.
+// "Run" is called after calling "NewNode". Some initialization works are done.
 func (node *Node) Run() {
 	node.server = rpc.NewServer()
 	err := node.server.Register(node)
@@ -501,18 +501,6 @@ func (node *Node) Join(addr string) bool {
 
 	node.fingerTableLock.Lock() // 全部一起修改可能会死锁
 	node.fingerTable[0] = suc
-	// for i := 1; i < kFingerTableSize; i++ {
-	// 	finStart := HashFinger(node.identify, i)
-	// 	var finNode NodeInf
-	// 	err = node.RemoteCall(node.Addr, "Node.FindSuccessor", finStart, &finNode)
-	// 	if err != nil {
-	// 		logrus.Errorf("[Join] [%s] fail to RemoteCall %s to <Findsuccessor> err: %s", node.Addr, suc.Addr, err)
-	// 	} else {
-	// 		node.fingerTableLock.Lock()
-	// 		node.fingerTable[i] = finNode
-	// 		node.fingerTableLock.Unlock()
-	// 	}
-	// }
 	node.fingerTableLock.Unlock()
 	node.nxtFin = 1
 
