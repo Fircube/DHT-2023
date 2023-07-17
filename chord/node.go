@@ -3,6 +3,7 @@ package chord
 import (
 	"fmt"
 	"math/big"
+	"math/rand"
 	"net"
 	"net/rpc"
 	"os"
@@ -84,8 +85,7 @@ func (node *Node) RemoteCall(addr string, method string, args interface{}, reply
 		return fmt.Errorf("[RemoteCall] with a empty address")
 	}
 
-	// Note: Here we use DialTimeout to set a timeout
-	conn, err := net.DialTimeout("tcp", addr, emitInterval) 
+	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		logrus.Errorf("[RemoteCall] [%s] dialing %s error:%s", node.Addr, addr, err)
 		return err
@@ -124,7 +124,10 @@ func (node *Node) GetPredecessor(_ string, reply *NodeInf) error {
 		logrus.Errorf("[GetPredecessor] [%s] is offline", node.Addr)
 		return fmt.Errorf("[GetPredecessor] [%s] is offline", node.Addr)
 	}
-	*reply = node.getPredecessor()
+	node.predecessorLock.RLock()
+	reply.Addr = node.predecessor.Addr
+	reply.Identify = Hash(reply.Addr)
+	node.predecessorLock.RUnlock()
 	return nil
 }
 
@@ -134,7 +137,10 @@ func (node *Node) GetSuccessorList(_ string, reply *[kSuccessorListSize]NodeInf)
 		return fmt.Errorf("[GetSuccessorList]] [%s] is offline", node.Addr)
 	}
 	node.successorListLock.RLock()
-	*reply = node.successorList
+	for i := 0; i < kSuccessorListSize; i++ {
+		reply[i].Addr = node.successorList[i].Addr
+		reply[i].Identify = Hash(reply[i].Addr)
+	}
 	node.successorListLock.RUnlock()
 	return nil
 }
@@ -145,16 +151,21 @@ func (node *Node) FindSuccessor(arg NodeInf, reply *NodeInf) error {
 		logrus.Errorf("[FindSuccessor] [%s] is offline", node.Addr)
 		return fmt.Errorf("[FindSuccessor] [%s] is offline", node.Addr)
 	}
-	suc := node.getSuccessor()
+	var suc NodeInf
+	suc.Addr = node.getSuccessor().Addr
+	suc.Identify = Hash(suc.Addr)
 	if suc.Addr == "" {
 		logrus.Errorf("[FindSuccessor] fail to get [%s] 's successor", node.Addr)
 		return fmt.Errorf("[FindSuccessor] fail to get [%s] 's successor", node.Addr)
 	}
 	if (arg.Identify.Cmp(suc.Identify) == 0) || (Contain(arg.Identify, node.Identify, suc.Identify)) {
-		*reply = suc
+		reply.Addr = suc.Addr
+		reply.Identify = Hash(reply.Addr)
 		return nil
 	}
-	closerNode := node.closestPrecedingFinger(arg.Identify)
+	var closerNode NodeInf
+	closerNode.Addr = node.closestPrecedingFinger(arg.Identify).Addr
+	closerNode.Identify = Hash(closerNode.Addr)
 	err := node.RemoteCall(closerNode.Addr, "Node.FindSuccessor", arg, reply)
 	if err != nil {
 		logrus.Errorf("[FindSuccessor] [%s] fail to RemoteCall %s to <FindSuccessor> err: %s", node.Addr, closerNode.Addr, err)
@@ -184,14 +195,17 @@ func (node *Node) TransferData(objectInf NodeInf, objectData *map[string]string)
 	node.backupLock.Unlock()
 
 	var empty string
-	suc := node.getSuccessor()
+	var suc NodeInf
+	suc.Addr = node.getSuccessor().Addr
+	suc.Identify = Hash(suc.Addr)
 	err := node.RemoteCall(suc.Addr, "Node.DeleteBackups", *objectData, &empty)
 	if err != nil {
 		logrus.Errorf("[TransferData] [%s] fail to RemoteCall %s to <DeleteBackups> err: %s", node.Addr, suc.Addr, err)
 		return fmt.Errorf("[TransferData] [%s] fail to RemoteCall %s to <DeleteBackups>", node.Addr, suc.Addr)
 	}
 	node.predecessorLock.Lock()
-	node.predecessor = objectInf
+	node.predecessor.Addr = objectInf.Addr
+	node.predecessor.Identify = Hash(node.predecessor.Addr)
 	node.predecessorLock.Unlock()
 	return nil
 }
@@ -267,7 +281,9 @@ func (node *Node) PutValue(pair Pair, _ *string) error {
 	node.dataLock.Unlock()
 
 	var empty string
-	suc := node.getSuccessor()
+	var suc NodeInf
+	suc.Addr = node.getSuccessor().Addr
+	suc.Identify = Hash(suc.Addr)
 	err := node.RemoteCall(suc.Addr, "Node.PutBackup", pair, &empty)
 	if err != nil {
 		logrus.Errorf("[PutValue] [%s] fail to RemoteCall %s to <PutBackup> err: %s", node.Addr, suc.Addr, err)
@@ -312,7 +328,9 @@ func (node *Node) DeleteValue(key string, _ *string) error {
 	node.dataLock.Unlock()
 
 	var empty string
-	suc := node.getSuccessor()
+	var suc NodeInf
+	suc.Addr = node.getSuccessor().Addr
+	suc.Identify = Hash(suc.Addr)
 	err := node.RemoteCall(suc.Addr, "Node.DeleteBackup", key, &empty)
 	if err != nil {
 		logrus.Errorf("[DeleteValue] [%s] fail to RemoteCall %s to <DeleteBackup> err: %s", node.Addr, suc.Addr, err)
@@ -328,7 +346,9 @@ func (node *Node) Stabilize(_ string, _ *string) error {
 		return fmt.Errorf("[Stabilize] [%s] is offline", node.Addr)
 	}
 	// logrus.Infof("[Stabilize] [%s] start to stabilize",node.Addr)
-	suc := node.getSuccessor()
+	var suc NodeInf
+	suc.Addr = node.getSuccessor().Addr
+	suc.Identify = Hash(suc.Addr)
 	var sucPre NodeInf
 	err := node.RemoteCall(suc.Addr, "Node.GetPredecessor", "", &sucPre)
 	if err != nil {
@@ -336,7 +356,8 @@ func (node *Node) Stabilize(_ string, _ *string) error {
 		return fmt.Errorf("[Stabilize] [%s] fail to RemoteCall %s to <GetPredecessor>", node.Addr, suc.Addr)
 	}
 	if sucPre.Addr != "" && Contain(sucPre.Identify, node.Identify, suc.Identify) {
-		suc = sucPre
+		suc.Addr = sucPre.Addr
+		suc.Identify = Hash(sucPre.Addr)
 	}
 	var sucSucList [kSuccessorListSize]NodeInf
 	err = node.RemoteCall(suc.Addr, "Node.GetSuccessorList", "", &sucSucList)
@@ -346,14 +367,17 @@ func (node *Node) Stabilize(_ string, _ *string) error {
 	}
 
 	node.successorListLock.Lock()
-	node.successorList[0] = suc
+	node.successorList[0].Addr = suc.Addr
+	node.successorList[0].Identify = Hash(node.successorList[0].Addr)
 	for i := 1; i < kSuccessorListSize; i++ {
-		node.successorList[i] = sucSucList[i-1]
+		node.successorList[i].Addr = sucSucList[i-1].Addr
+		node.successorList[i].Identify = Hash(node.successorList[i].Addr)
 	}
 	node.successorListLock.Unlock()
 
 	node.fingerTableLock.Lock()
-	node.fingerTable[0] = suc
+	node.fingerTable[0].Addr = suc.Addr
+	node.fingerTable[0].Identify = Hash(node.fingerTable[0].Addr)
 	node.fingerTableLock.Unlock()
 	node.nxtFin = 1
 
@@ -372,7 +396,9 @@ func (node *Node) Notify(arg string, _ *string) error {
 		logrus.Errorf("[Notify] [%s] is offline", node.Addr)
 		return fmt.Errorf("[Notify] [%s] is offline", node.Addr)
 	}
-	pre := node.getPredecessor()
+	var pre NodeInf
+	pre.Addr = node.getPredecessor().Addr
+	pre.Identify = Hash(pre.Addr)
 	var empty string
 	if arg == "" {
 		if pre.Addr != "" && !node.ping(pre.Addr) {
@@ -380,7 +406,9 @@ func (node *Node) Notify(arg string, _ *string) error {
 			node.predecessor = NodeInf{}
 			node.predecessorLock.Unlock()
 			node.absorbBackups()
-			suc := node.getSuccessor()
+			var suc NodeInf
+			suc.Addr = node.getSuccessor().Addr
+			suc.Identify = Hash(suc.Addr)
 			err := node.RemoteCall(suc.Addr, "Node.PutBackups", node.backup, &empty)
 			if err != nil {
 				logrus.Errorf("[Notify] [%s] fail to RemoteCall %s to <PutBackups> err: %s", node.Addr, suc.Addr, err)
@@ -455,15 +483,18 @@ func (node *Node) Run() {
 
 // Create a new network.
 func (node *Node) Create() {
+	rand.Seed(time.Now().UnixNano())
 	logrus.Infof("[Create] [%s]", node.Addr)
 	nodeId := NodeInf{node.Addr, node.Identify}
 
 	node.successorListLock.Lock()
-	node.successorList[0] = nodeId
+	node.successorList[0].Addr = nodeId.Addr
+	node.successorList[0].Identify = Hash(node.successorList[0].Addr)
 	node.successorListLock.Unlock()
 
 	node.fingerTableLock.Lock()
-	node.fingerTable[0] = nodeId
+	node.fingerTable[0].Addr = nodeId.Addr
+	node.fingerTable[0].Identify = Hash(node.fingerTable[0].Addr)
 	node.fingerTableLock.Unlock()
 
 	node.nxtFin = 1
@@ -493,14 +524,17 @@ func (node *Node) Join(addr string) bool {
 	}
 
 	node.successorListLock.Lock()
-	node.successorList[0] = suc
+	node.successorList[0].Addr = suc.Addr
+	node.successorList[0].Identify = Hash(node.successorList[0].Addr)
 	for i := 1; i < kSuccessorListSize; i++ {
-		node.successorList[i] = sucSucList[i-1]
+		node.successorList[i].Addr = sucSucList[i-1].Addr
+		node.successorList[i].Identify = Hash(node.successorList[0].Addr)
 	}
 	node.successorListLock.Unlock()
 
 	node.fingerTableLock.Lock() // 全部一起修改可能会死锁
-	node.fingerTable[0] = suc
+	node.fingerTable[0].Addr = suc.Addr
+	node.fingerTable[0].Identify = Hash(node.fingerTable[0].Addr)
 	node.fingerTableLock.Unlock()
 	node.nxtFin = 1
 
@@ -537,12 +571,16 @@ func (node *Node) Quit() {
 	node.quitChan = make(chan bool, 1)
 	node.clear()
 	var empty string
-	suc := node.getSuccessor()
+	var suc NodeInf
+	suc.Addr = node.getSuccessor().Addr
+	suc.Identify = Hash(suc.Addr)
 	err = node.RemoteCall(suc.Addr, "Node.Notify", "", &empty)
 	if err != nil {
 		logrus.Errorf("[Quit] [%s] fail to RemoteCall %s to <Notify> err: %s", node.Addr, suc.Addr, err)
 	}
-	pre := node.getPredecessor()
+	var pre NodeInf
+	pre.Addr = node.getPredecessor().Addr
+	pre.Identify = Hash(pre.Addr)
 	err = node.RemoteCall(pre.Addr, "Node.Stabilize", "", &empty)
 	if err != nil {
 		logrus.Errorf("[Quit] [%s] fail to RemoteCall %s to <Stabilize> err: %s", node.Addr, suc.Addr, err)
@@ -632,8 +670,8 @@ func (node *Node) Get(key string) (bool, string) {
 // Return "true" if success, "false" otherwise.
 func (node *Node) Delete(key string) bool {
 	if !node.online {
-	logrus.Errorf("[Delete] [%s] is offline", node.Addr)
-	return false
+		logrus.Errorf("[Delete] [%s] is offline", node.Addr)
+		return false
 	}
 	logrus.Infof("[Delete] key:%s", key)
 	var tar NodeInf
@@ -652,20 +690,6 @@ func (node *Node) Delete(key string) bool {
 }
 
 // DHT methods for assistant
-func (node *Node) fixFingers() {
-	finStart := HashFinger(node.Identify, node.nxtFin)
-	var finNode NodeInf
-	err := node.FindSuccessor(NodeInf{"", finStart}, &finNode)
-	if err != nil {
-		logrus.Errorf("[Join] [%s] fail to <Findsuccessor> err: %s", node.Addr, err)
-	} else {
-		node.fingerTableLock.Lock()
-		node.fingerTable[node.nxtFin] = finNode
-		node.fingerTableLock.Unlock()
-	}
-	node.nxtFin = (node.nxtFin + 1) % kFingerTableSize
-}
-
 func (node *Node) getPredecessor() NodeInf {
 	node.predecessorLock.RLock()
 	defer node.predecessorLock.RUnlock()
@@ -675,12 +699,63 @@ func (node *Node) getPredecessor() NodeInf {
 func (node *Node) getSuccessor() NodeInf {
 	for i := 0; i < kSuccessorListSize; i++ {
 		node.successorListLock.RLock()
-		suc := node.successorList[i]
+		var suc NodeInf
+		suc.Addr = node.successorList[i].Addr
+		suc.Identify = Hash(suc.Addr)
 		node.successorListLock.RUnlock()
 		if node.ping(suc.Addr) {
 			// logrus.Infof("[getSuccessor] get [%s]'s successor %s", node.Addr, suc.Addr)
+			var sucSucList [kSuccessorListSize]NodeInf
+			err := node.RemoteCall(suc.Addr, "Node.GetSuccessorList", "", &sucSucList)
+			if err != nil {
+				logrus.Errorf("[updateSuccessor] [%s] fail to RemoteCall %s to <GetSuccessorList> err: %s", node.Addr, suc.Addr, err)
+				continue
+			}
+			node.successorListLock.Lock()
+			node.successorList[0].Addr = suc.Addr
+			node.successorList[0].Identify = Hash(node.successorList[0].Addr)
+			for i := 1; i < kSuccessorListSize; i++ {
+				node.successorList[i].Addr = sucSucList[i-1].Addr
+				node.successorList[i].Identify = Hash(node.successorList[i].Addr)
+			}
+			node.successorListLock.Unlock()
 			return suc
 		}
+		logrus.Infof("[getSuccessor] get [%s]'s successor fail", node.Addr)
+	}
+	for i := 0; i < kFingerTableSize; i++ {
+		node.fingerTableLock.RLock()
+		var assistant NodeInf
+		assistant.Addr = node.fingerTable[i].Addr
+		assistant.Identify = Hash(assistant.Addr)
+		node.fingerTableLock.RUnlock()
+		var suc NodeInf
+		if assistant.Addr != "" && node.ping(assistant.Addr) {
+			logrus.Infof("[getSuccessor] get [%s]'s finger successor", node.Addr)
+			err := node.RemoteCall(assistant.Addr, "Node.FindSuccessor", NodeInf{node.Addr, node.Identify}, &suc)
+			if err != nil {
+				logrus.Errorf("[updateSuccessor] [%s] fail to RemoteCall %s to <FindSuccessor> err: %s", node.Addr, assistant.Addr, err)
+				continue
+			}
+
+			var sucSucList [kSuccessorListSize]NodeInf
+			err = node.RemoteCall(suc.Addr, "Node.GetSuccessorList", "", &sucSucList)
+			if err != nil {
+				logrus.Errorf("[updateSuccessor] [%s] fail to RemoteCall %s to <GetSuccessorList> err: %s", node.Addr, suc.Addr, err)
+				continue
+			}
+			logrus.Infof("[getSuccessor] get [%s]'s finger successor success", node.Addr)
+			node.successorListLock.Lock()
+			node.successorList[0].Addr = suc.Addr
+			node.successorList[0].Identify = Hash(node.successorList[0].Addr)
+			for i := 1; i < kSuccessorListSize; i++ {
+				node.successorList[i].Addr = sucSucList[i-1].Addr
+				node.successorList[i].Identify = Hash(node.successorList[i].Addr)
+			}
+			node.successorListLock.Unlock()
+			return suc
+		}
+		logrus.Infof("[getSuccessor] get [%s]'s finger successor fail", node.Addr)
 	}
 	logrus.Errorf("[getSuccessor] fail to find the successor of [%s]", node.Addr)
 	return NodeInf{}
@@ -702,7 +777,9 @@ func (node *Node) getSuccessor() NodeInf {
 func (node *Node) closestPrecedingFinger(id *big.Int) NodeInf {
 	for i := kFingerTableSize - 1; i >= 0; i-- {
 		node.fingerTableLock.RLock()
-		fin := node.fingerTable[i]
+		var fin NodeInf
+		fin.Addr = node.fingerTable[i].Addr
+		fin.Identify = Hash(fin.Addr)
 		node.fingerTableLock.RUnlock()
 		if fin.Addr == "" {
 			continue
@@ -745,6 +822,21 @@ func (node *Node) clear() {
 	node.backupLock.Lock()
 	node.backup = make(map[string]string)
 	node.backupLock.Unlock()
+}
+
+func (node *Node) fixFingers() {
+	finStart := HashFinger(node.Identify, node.nxtFin)
+	var finNode NodeInf
+	err := node.FindSuccessor(NodeInf{"", finStart}, &finNode)
+	if err != nil {
+		logrus.Errorf("[Join] [%s] fail to <Findsuccessor> err: %s", node.Addr, err)
+	} else {
+		node.fingerTableLock.Lock()
+		node.fingerTable[node.nxtFin].Addr = finNode.Addr
+		node.fingerTable[node.nxtFin].Identify = Hash(node.fingerTable[node.nxtFin].Addr)
+		node.fingerTableLock.Unlock()
+	}
+	node.nxtFin = (node.nxtFin + 1) % kFingerTableSize
 }
 
 func (node *Node) update() {
