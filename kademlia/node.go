@@ -28,7 +28,7 @@ type Node struct {
 	Addr     string
 	Identify big.Int
 
-	data    Data
+	data    DataType
 	KBucket [kHashSize]Bucket
 }
 
@@ -46,7 +46,9 @@ func RemoteCall(addr string, method string, args interface{}, reply interface{})
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		logrus.Errorf("[RemoteCall] dialing %s error:%s", addr, err)
+		if method != "Node.PingRPC" {
+			logrus.Errorf("[RemoteCall] [%s] error:%s", method, err)
+		}
 		return err
 	}
 
@@ -68,85 +70,101 @@ func (node *Node) PingRPC(_ string, _ *string) error {
 	return nil
 }
 
-func (node *Node) Putin(pair Pair, sender *string) error {
-	node.data.put(pair.key, pair.value)
-	node.update(*sender)
+func (node *Node) Putin(pair Pair, _ *string) error {
+	node.data.put(pair.Key, pair.Value)
 	return nil
 }
 
 // Store instructs a node to store a <key,value> pair for later retrieval
 func (node *Node) Store(pair Pair, _ *string) error {
-	retList := node.lookup(pair.key)
-	p := retList.Rlist.Head.Next
-	for p != retList.Rlist.Rear {
-		err := RemoteCall(p.Addr, "Node.Putin", pair, &node.Addr)
+	retList := node.Lookup(pair.Key)
+	// p := retList.Rlist.Head.Next
+	// for p != retList.Rlist.Rear {
+	for i := 0; i < retList.Rlist.Size; i++ {
+		var empty string
+		err := RemoteCall(retList.Rlist.Data[i], "Node.Putin", pair, &empty)
+		RemoteCall(retList.Rlist.Data[i], "Node.Update", node.Addr, &empty)
 		if err != nil {
-			logrus.Errorf("[Store] [%s] fail to put", p.Addr)
-			return fmt.Errorf("[Store] [%s] fail to put", p.Addr)
+			logrus.Errorf("[Store] [%s] fail to put", retList.Rlist.Data[i])
+			return fmt.Errorf("[Store] [%s] fail to put", retList.Rlist.Data[i])
 		}
-		p = p.Next
+		// p = p.Next
 	}
 	return nil
 }
 
-// return NodeInf for the k nodes it knows about closest to the target ID
+func (node *Node) Update(addr string, _ *string) error {
+	if addr == "" || addr == node.Addr {
+		return nil
+	}
+	ind := cpl(Hash(addr), Hash(node.Addr))
+	if ind < 0 {
+		logrus.Error("[update] error in index")
+	}
+	node.KBucket[ind].update(addr)
+	return nil
+}
+
+// return NodeInf for the k nodes it knows about closest to the addr
 func (node *Node) FindNode(addr string, retList *RetList) error {
 	retList.Rlist.Init(addr)
 	ind := cpl(Hash(addr), Hash(node.Addr))
 	if ind < 0 {
-		retList.insert(addr)
+		retList.Insert(addr)
 	} else {
 		node.KBucket[ind].mu.RLock()
-		p := node.KBucket[ind].list.Head.Next
-		for p != node.KBucket[ind].list.Rear {
-			retList.insert(p.Addr)
-			p = p.Next
+		// p := node.KBucket[ind].list.Head.Next
+		// for p != node.KBucket[ind].list.Rear {
+		for i := 0; i < node.KBucket[ind].list.Size; i++ {
+			retList.Insert(node.KBucket[ind].list.Data[i])
+			// p = p.Next
 		}
 		node.KBucket[ind].mu.RUnlock()
 	}
-	logrus.Warn("1111")
 	if retList.Rlist.Size == k {
 		return nil
 	}
 	for i := ind - 1; i >= 0; i-- {
 		node.KBucket[i].mu.RLock()
-		p := node.KBucket[i].list.Head.Next
-		for p != node.KBucket[i].list.Rear {
-			retList.insert(p.Addr)
-			p = p.Next
+		// p := node.KBucket[i].list.Head.Next
+		// for p != node.KBucket[i].list.Rear {
+		for j := 0; j < node.KBucket[i].list.Size; j++ {
+			retList.Insert(node.KBucket[i].list.Data[j])
+			// p = p.Next
 		}
 		node.KBucket[i].mu.RUnlock()
 	}
+	retList.Insert(node.Addr)
 	if retList.Rlist.Size == k {
 		return nil
 	}
 	for i := ind + 1; i < kHashSize; i++ {
 		node.KBucket[i].mu.RLock()
-		p := node.KBucket[i].list.Head.Next
-		for p != node.KBucket[i].list.Rear {
-			retList.insert(p.Addr)
-			p = p.Next
+		// p := node.KBucket[i].list.Head.Next
+		// for p != node.KBucket[i].list.Rear {
+		for j := 0; j < node.KBucket[i].list.Size; j++ {
+			retList.Insert(node.KBucket[i].list.Data[j])
+			// p = p.Next
 		}
 		node.KBucket[i].mu.RUnlock()
 	}
 	return nil
 }
 
-type findValueReply struct {
-	value   string
-	retList RetList
+type FindValueReply struct {
+	Value string
+	RList RetList
 }
 
-func (node *Node) FindValue(key string, ret *findValueReply) error {
+func (node *Node) FindValue(key string, ret *FindValueReply) error {
 	ok, value := node.data.get(key)
 	if ok {
-		*ret = findValueReply{value, RetList{}}
+		*ret = FindValueReply{value, RetList{}}
 		return nil
 	}
 	var retList RetList
 	node.FindNode(key, &retList)
-	// logrus.Warnf("<[%s]>%v",retList.Rlist.nodeAddr,retList.Rlist.Size)
-	*ret = findValueReply{"", retList}
+	*ret = FindValueReply{"", retList}
 	return nil
 }
 
@@ -222,7 +240,7 @@ func (node *Node) Create() {
 func (node *Node) Join(addr string) bool {
 	logrus.Infof("[Join] join [%s] to %s", node.Addr, addr)
 	node.update(addr)
-	node.lookup(node.Addr)
+	node.Lookup(node.Addr)
 	logrus.Infof("[Join] [%s] joined successfully", node.Addr)
 	node.maintain()
 	return true
@@ -301,6 +319,7 @@ func (node *Node) Put(key string, value string) bool {
 		return false
 	}
 	err := node.Store(Pair{key, value}, &node.Addr)
+	logrus.Infof("[Put] [%s] %s", node.Addr, key)
 	return err == nil
 }
 
@@ -311,16 +330,17 @@ func (node *Node) Get(key string) (bool, string) {
 		logrus.Errorf("[Get] [%s] is offline", node.Addr)
 		return false, ""
 	}
-	var ret findValueReply
+	var ret FindValueReply
 	err := node.FindValue(key, &ret)
 	if err != nil {
 		logrus.Errorf("[Get] [%s] fail to get %s", node.Addr, key)
 		return false, ""
 	}
-	if ret.value != "" {
-		return true, ret.value
+	if ret.Value != "" {
+		return true, ret.Value
 	}
-	return node.getvalue(key, ret.retList)
+	logrus.Infof("[Get] [%s] %s", node.Addr, key)
+	return node.getvalue(key, ret.RList)
 }
 
 // Remove a key-value pair identified by KEY from the network.
@@ -337,89 +357,56 @@ func (node *Node) Delete(key string) bool {
 // local func
 //
 
-// kBucket中离addr最近的k个节点
-func (node *Node) findNode(addr string) RetList {
-	var retList RetList
-	retList.Rlist.Init(addr)
-	ind := cpl(Hash(addr), Hash(node.Addr))
-	if ind < 0 {
-		retList.insert(addr)
-	} else {
-		node.KBucket[ind].mu.RLock()
-		p := node.KBucket[ind].list.Head.Next
-		for p != node.KBucket[ind].list.Rear {
-			retList.insert(p.Addr)
-			p = p.Next
-		}
-		node.KBucket[ind].mu.RUnlock()
-	}
-	if retList.Rlist.Size == k {
-		return retList
-	}
-	for i := ind - 1; i >= 0; i-- {
-		node.KBucket[i].mu.RLock()
-		p := node.KBucket[i].list.Head.Next
-		for p != node.KBucket[i].list.Rear {
-			retList.insert(p.Addr)
-			p = p.Next
-		}
-		node.KBucket[i].mu.RUnlock()
-	}
-	if retList.Rlist.Size == k {
-		return retList
-	}
-	for i := ind + 1; i < kHashSize; i++ {
-		node.KBucket[i].mu.RLock()
-		p := node.KBucket[i].list.Head.Next
-		for p != node.KBucket[i].list.Rear {
-			retList.insert(p.Addr)
-			p = p.Next
-		}
-		node.KBucket[i].mu.RUnlock()
-	}
-	return retList
-}
-
 // 找到所有节点中离addr最近k个节点
-func (node *Node) lookup(addr string) RetList {
-	retList := node.findNode(addr)
-
+func (node *Node) Lookup(addr string) RetList {
+	var retList RetList
+	// retList.Rlist.Init(addr)
+	err := node.FindNode(addr, &retList)
+	if err != nil {
+		logrus.Errorf("[lookup] %s fail", addr)
+	}
 	updated := true
 	visited := make(map[string]bool)
 	for updated {
 		updated = false
-		p := retList.Rlist.Head.Next
+		// p := retList.Rlist.Head.Next
 		var invalid []string
 		var tmpList RetList
 		tmpList.Rlist.Init(addr)
-		for p != retList.Rlist.Rear {
-			if visited[p.Addr] {
+		// for p != retList.Rlist.Rear {
+		for i := 0; i < retList.Rlist.Size; i++ {
+			if visited[retList.Rlist.Data[i]] {
 				continue
 			}
-			visited[p.Addr] = true
-			node.update(p.Addr)
+			visited[retList.Rlist.Data[i]] = true
+			node.update(retList.Rlist.Data[i])
 
 			var ret RetList
-			ret.Rlist.Init(addr)
-			err := RemoteCall(p.Addr, "Node.FindNode", addr, &ret)
+			// ret.Rlist.Init(addr)
+			err = RemoteCall(retList.Rlist.Data[i], "Node.FindNode", addr, &ret)
+			var empty string
+			RemoteCall(retList.Rlist.Data[i], "Node.Update", node.Addr, &empty)
 			if err != nil {
-				logrus.Errorf("[FindNode] [%s] fail to find %s", p.Addr, addr)
-				invalid = append(invalid, p.Addr)
+				logrus.Warnf("[FindNode] [%s] fail to find %s", retList.Rlist.Data[i], addr)
+				invalid = append(invalid, retList.Rlist.Data[i])
 			} else {
-				pp := ret.Rlist.Head.Next
-				for pp != ret.Rlist.Rear {
-					tmpList.insert(pp.Addr)
-					pp = pp.Next
+				// pp := ret.Rlist.Head.Next
+				// for pp != ret.Rlist.Rear {
+				for j := 0; j < ret.Rlist.Size; j++ {
+					tmpList.Insert(ret.Rlist.Data[j])
+					// pp = pp.Next
 				}
 			}
-			p = p.Next
+			// p = p.Next
 		}
 		for _, v := range invalid {
-			retList.delete(v)
+			retList.Delete(v)
+			updated = true
 		}
-		p = tmpList.Rlist.Head.Next
-		for p != tmpList.Rlist.Rear {
-			if retList.insert(p.Addr) {
+		// p = tmpList.Rlist.Head.Next
+		// for p != tmpList.Rlist.Rear {
+		for i := 0; i < tmpList.Rlist.Size; i++ {
+			if retList.Insert(tmpList.Rlist.Data[i]) {
 				updated = true
 			}
 		}
@@ -428,54 +415,56 @@ func (node *Node) lookup(addr string) RetList {
 }
 
 func (node *Node) getvalue(key string, retList RetList) (bool, string) {
-	// logrus.Warnf("<[%s]>%v",retList.Rlist.nodeAddr,retList.Rlist.Size)
 	updated := true
 	visited := make(map[string]bool)
+	defer logrus.Infof("[getValue] [%s] %s", node.Addr, key)
 	for updated {
-		// logrus.Warn("1")
 		updated = false
-		p := retList.Rlist.Head.Next
+		// p := retList.Rlist.Head.Next
 		var invalid []string
 		var tmpList RetList
 		tmpList.Rlist.Init(key)
-		for p != retList.Rlist.Rear {
-			logrus.Warn("2")
-			if visited[p.Addr] {
+		// for p != retList.Rlist.Rear {
+		for i := 0; i < retList.Rlist.Size; i++ {
+			if visited[retList.Rlist.Data[i]] {
 				continue
 			}
-			visited[p.Addr] = true
-			node.update(p.Addr)
+			visited[retList.Rlist.Data[i]] = true
+			node.update(retList.Rlist.Data[i])
 
-			var ret findValueReply
-			ret.retList.Rlist.Init(key)
-			err := RemoteCall(p.Addr, "Node.FindValue", key, &ret)
+			var ret FindValueReply
+			ret.RList.Rlist.Init(key)
+			err := RemoteCall(retList.Rlist.Data[i], "Node.FindValue", key, &ret)
+			var empty string
+			RemoteCall(retList.Rlist.Data[i], "Node.Update", node.Addr, &empty)
 			if err != nil {
-				logrus.Errorf("[FindValue [%s] fail to find %s", p.Addr, key)
-				invalid = append(invalid, p.Addr)
+				logrus.Errorf("[FindValue] [%s] fail to find %s", retList.Rlist.Data[i], key)
+				invalid = append(invalid, retList.Rlist.Data[i])
 			} else {
-				logrus.Warn("4")
-				if ret.value != "" {
-					return true, ret.value
+				if ret.Value != "" {
+					return true, ret.Value
 				}
-				pp := ret.retList.Rlist.Head.Next
-				for pp != ret.retList.Rlist.Rear {
-					tmpList.insert(pp.Addr)
-					pp = pp.Next
+				// pp := ret.RList.Rlist.Head.Next
+				// for pp != ret.RList.Rlist.Rear {
+				for j := 0; j < ret.RList.Rlist.Size; j++ {
+					tmpList.Insert(ret.RList.Rlist.Data[j])
+					// pp = pp.Next
 				}
 			}
-			p = p.Next
+			// p = p.Next
 		}
 		for _, v := range invalid {
-			retList.delete(v)
+			retList.Delete(v)
+			updated = true
 		}
-		p = tmpList.Rlist.Head.Next
-		for p != tmpList.Rlist.Rear {
-			if retList.insert(p.Addr) {
+		// p = tmpList.Rlist.Head.Next
+		// for p != tmpList.Rlist.Rear {
+		for i := 0; i < tmpList.Rlist.Size; i++ {
+			if retList.Insert(tmpList.Rlist.Data[i]) {
 				updated = true
 			}
 		}
 	}
-	// logrus.Warn("3")
 	return false, ""
 }
 
@@ -488,22 +477,19 @@ func (node *Node) update(addr string) {
 		logrus.Error("[update] error in index")
 	}
 	node.KBucket[ind].update(addr)
-
 }
 
 func (node *Node) republish() {
 	republishList := node.data.republish()
-	for _, key := range republishList {
-		node.data.mu.RLock()
-		node.Put(key, node.data.data[key])
-		node.data.mu.RUnlock()
+	for key, value := range republishList {
+		node.Put(key, value)
 	}
 }
 
 func (node *Node) republishAll() {
 	node.data.mu.RLock()
-	for key := range node.data.data {
-		node.Put(key, node.data.data[key])
+	for key, value := range node.data.Data {
+		node.Put(key, value)
 	}
 	node.data.mu.RUnlock()
 }

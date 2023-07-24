@@ -13,10 +13,10 @@ const (
 )
 
 const (
-	ExpireInterval    = 86410 * time.Millisecond
-	RepublishInterval = 86400 * time.Millisecond
-	ExpireTime   = 20 * time.Second
-	RepublishTime= 10 * time.Second
+	ExpireInterval    = 2000 * time.Millisecond
+	RepublishInterval = 400 * time.Millisecond
+	ExpireTime   = 2000 * time.Millisecond
+	RepublishTime= 400 * time.Millisecond
 )
 
 func Hash(s string) *big.Int {

@@ -6,72 +6,72 @@ import (
 )
 
 type Pair struct {
-	key   string
-	value string
+	Key   string
+	Value string
 }
 
-type Data struct {
-	data          map[string]string
-	expireTime    map[string]time.Time // 过期时间
-	republishTime map[string]time.Time // 重新发布时间
+type DataType struct {
+	Data          map[string]string
+	ExpireTime    map[string]time.Time // 过期时间
+	RepublishTime map[string]time.Time // 重新发布时间
 	mu            sync.RWMutex
 }
 
-func (data *Data) Init() {
+func (data *DataType) Init() {
 	data.mu.Lock()
-	data.data = make(map[string]string)
-	data.expireTime = make(map[string]time.Time)
-	data.republishTime = make(map[string]time.Time)
+	data.Data = make(map[string]string)
+	data.ExpireTime = make(map[string]time.Time)
+	data.RepublishTime = make(map[string]time.Time)
 	data.mu.Unlock()
 }
 
-func (data *Data) put(key string, value string) {
+func (data *DataType) put(key string, value string) {
 	data.mu.Lock()
-	data.data[key] = value
-	data.expireTime[key] = time.Now().Add(ExpireTime)
-	data.republishTime[key] = time.Now().Add(RepublishTime)
+	data.Data[key] = value
+	data.ExpireTime[key] = time.Now().Add(ExpireTime)
+	data.RepublishTime[key] = time.Now().Add(RepublishTime)
 	data.mu.Unlock()
 }
 
-func (data *Data) get(key string) (bool, string) {
+func (data *DataType) get(key string) (bool, string) {
 	data.mu.RLock()
-	value, ok := data.data[key]
+	value, ok := data.Data[key]
 	data.mu.RUnlock()
 	return ok, value
 }
 
-func (data *Data) republish() []string {
-	var republishList []string
+func (data *DataType) republish() map[string]string {
+	republishList:=make(map[string]string)
 	data.mu.RLock()
-	for k, republishTime := range data.republishTime {
-		if time.Now().After(republishTime) {
-			republishList = append(republishList, k)
+	for key, t := range data.RepublishTime {
+		if time.Now().After(t) {
+			republishList[key] = data.Data[key]
 		}
 	}
 	data.mu.RUnlock()
 	return republishList
 }
 
-func (data *Data) expire() {
+func (data *DataType) expire() {
 	var invalid []string
 	data.mu.Lock()
-	for k, expireTime := range data.expireTime {
-		if time.Now().After(expireTime) {
-			invalid = append(invalid, k)
+	for key, t := range data.ExpireTime {
+		if time.Now().After(t) {
+			invalid = append(invalid, key)
 		}
 	}
 	for _, k := range invalid {
-		delete(data.data, k)
-		delete(data.expireTime, k)
-		delete(data.republishTime, k)
+		delete(data.Data, k)
+		delete(data.ExpireTime, k)
+		delete(data.RepublishTime, k)
 	}
 	data.mu.Unlock()
 }
 
-func (data *Data) clear() {
+func (data *DataType) clear() {
 	data.mu.Lock()
-	data.data = make(map[string]string)
-	data.expireTime = make(map[string]time.Time)
-	data.republishTime = make(map[string]time.Time)
+	data.Data = make(map[string]string)
+	data.ExpireTime = make(map[string]time.Time)
+	data.RepublishTime = make(map[string]time.Time)
 	data.mu.Unlock()
 }
