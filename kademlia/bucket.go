@@ -4,19 +4,6 @@ import (
 	"sync"
 )
 
-// type ListNode struct {
-// 	Addr string
-// 	Prev *ListNode
-// 	Next *ListNode
-// }
-
-// type List struct {
-// 	NodeAddr string
-// 	Head     *ListNode
-// 	Rear     *ListNode
-// 	Size     int
-// }
-
 type List struct {
 	NodeAddr string
 	Data     [k]string
@@ -59,12 +46,13 @@ func (l *List) insert(ind int, addr string) {
 }
 
 func (l *List) delete(ind int) {
-	if ind >= k {
+	if ind >= l.Size {
 		return
 	}
 	for i := ind; i < l.Size-1; i++ {
 		l.Data[i] = l.Data[i+1]
 	}
+	l.Data[l.Size-1]=""
 	l.Size--
 }
 
@@ -96,6 +84,19 @@ func (l *List) update(addr string) {
 	}
 }
 
+// type ListNode struct {
+// 	Addr string
+// 	Prev *ListNode
+// 	Next *ListNode
+// }
+
+// type List struct {
+// 	NodeAddr string
+// 	Head     *ListNode
+// 	Rear     *ListNode
+// 	Size     int
+// }
+
 // func (l *List) Init(addr string) {
 // 	l.NodeAddr = addr
 // 	l.Head = new(ListNode)
@@ -109,10 +110,7 @@ func (l *List) update(addr string) {
 
 // func (l *List) pushback(addr string) {
 // 	var newNode ListNode
-// 	newNode.Addr = addr
-// 	newNode.Prev = l.Rear.Prev
-// 	newNode.Next = l.Rear
-// 	// newNode := ListNode{addr, l.Rear.Prev, l.Rear}
+// newNode := ListNode{addr, l.Rear.Prev, l.Rear}
 // 	l.Rear.Prev.Next = &newNode
 // 	l.Rear.Prev = &newNode
 // 	l.Size++
@@ -143,10 +141,7 @@ func (l *List) update(addr string) {
 // 		return
 // 	}
 // 	var newNode ListNode
-// 	newNode.Addr = addr
-// 	newNode.Prev = point
-// 	newNode.Next = point.Next
-// 	// newNode := ListNode{addr, point, point.Next}
+// newNode := ListNode{addr, point, point.Next}
 // 	point.Next.Prev = &newNode
 // 	point.Next = &newNode
 // 	l.Size++
@@ -202,41 +197,6 @@ func (b *Bucket) Init(addr string) {
 	b.mu.Unlock()
 }
 
-// func (b *Bucket) pushback(addr string) {
-// 	b.mu.Lock()
-// 	b.list.pushback(addr)
-// 	b.mu.Unlock()
-// }
-
-// func (b *Bucket) popback() {
-// 	b.mu.Lock()
-// 	b.list.popback()
-// 	b.mu.Unlock()
-// }
-// func (b *Bucket) find(addr string) *ListNode {
-// 	b.mu.RLock()
-// 	defer b.mu.RUnlock()
-// 	return b.list.find(addr)
-// }
-
-// func (b *Bucket) insert(point *ListNode, addr string) {
-// 	b.mu.Lock()
-// 	defer b.mu.Unlock()
-// 	b.list.insert(point,addr)
-// }
-
-// func (b *Bucket) delete(point *ListNode) {
-// 	b.mu.Lock()
-// 	defer b.mu.Unlock()
-// 	b.list.delete(point)
-// }
-
-// func (b *Bucket) moveToRear(point *ListNode) {
-// 	b.mu.Lock()
-// 	defer b.mu.Unlock()
-// 	b.list.moveToRear(point)
-// }
-
 func (b *Bucket) update(addr string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -259,21 +219,16 @@ func (retList *RetList) Insert(addr string) bool {
 	}
 	dis := Xor(Hash(addr), Hash(retList.Rlist.NodeAddr))
 	if retList.Rlist.Size < k {
-		// p := retList.Rlist.Head.Next
-		// for p != retList.Rlist.Rear {
 		for i := 0; i < retList.Rlist.Size; i++ {
 			oriDis := Xor(Hash(retList.Rlist.Data[i]), Hash(retList.Rlist.NodeAddr))
 			if dis.Cmp(&oriDis) < 0 {
 				retList.Rlist.insert(i, addr)
 				return true
 			}
-			// p = p.Next
 		}
 		retList.Rlist.pushback(addr)
 		return true
 	} else {
-		// p := retList.Rlist.Head.Next
-		// for p != retList.Rlist.Rear {
 		for i := 0; i < retList.Rlist.Size; i++ {
 			oriDis := Xor(Hash(retList.Rlist.Data[i]), Hash(retList.Rlist.NodeAddr))
 			if dis.Cmp(&oriDis) < 0 {
@@ -281,7 +236,6 @@ func (retList *RetList) Insert(addr string) bool {
 				retList.Rlist.insert(i, addr)
 				return true
 			}
-			// p = p.Next
 		}
 		return false
 	}
@@ -289,14 +243,11 @@ func (retList *RetList) Insert(addr string) bool {
 }
 
 func (retList *RetList) Delete(addr string) bool {
-	// p := retList.Rlist.Head.Next
-	// for p != retList.Rlist.Rear {
 	for i := 0; i < retList.Rlist.Size; i++ {
 		if addr == retList.Rlist.Data[i]{
 			retList.Rlist.delete(i)
 			return true
 		}
-		// p = p.Next
 	}
 	return false
 }
