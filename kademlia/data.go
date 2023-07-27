@@ -54,12 +54,14 @@ func (data *DataType) republish() map[string]string {
 
 func (data *DataType) expire() {
 	var invalid []string
-	data.mu.Lock()
+	data.mu.RLock()
 	for key, t := range data.ExpireTime {
 		if time.Now().After(t) {
 			invalid = append(invalid, key)
 		}
 	}
+	data.mu.RUnlock()
+	data.mu.Lock()
 	for _, k := range invalid {
 		delete(data.Data, k)
 		delete(data.ExpireTime, k)
