@@ -7,11 +7,13 @@
 - fixFingers() 不采用random index，而是在每个节点记录下一次要fix的位置，逐次更新
 
 ### Debug
-1. fatal error: oom（out of memory） 产生原因：计算fingertable时未取余   
-2. fatal error: i/o timeout 
-    产生原因：模拟高并发的场景，会出现批量的`TIME_WAIT`的`TCP`连接，在2个`MSL`时间内建立、关闭超过65535个`TCP`连接就会出现端口耗尽问题。 
+1. fatal error: oom（out of memory）  
+ 产生原因：计算`fingertable`时未取余   
+2. fatal error: i/o timeout   
+    产生原因：模拟高并发的场景，会出现批量的`TIME_WAIT`的`TCP`连接，在2个`MSL`时间内建立、关闭超过65535个`TCP`连接就会出现端口耗尽问题。  
     解决方法：`TCP`连接复用/换用`UDP`协议
-3. 结构体内部指针不应直接赋值。 `big.Int`类复制值必须使用`Int.Set`方法；浅拷贝不受支持且可能会导致错误
+3. 结构体内部指针不应直接赋值。  
+    `big.Int`类复制值必须使用`Int.Set`方法；浅拷贝不受支持且可能会导致错误
 4. 打印出的包含足够信息的log可以帮助调试
 
 ### File Structure
@@ -24,8 +26,8 @@
 - 数据备份更多，提高数据的可靠性和可用性。但由于没有删除操作，存储副本的数量越多，添加数据所需的时间和网络开销也会相应增加。
 
 ### Debug
-1. rpc调用传参相关问题。
-    实现`bucket`的时候一开始使用链表写法，因为结构体内含指针，出现循环引用问题。`rpc`调用会对参数进行`gob encoding`,当使用`encoding`包对这样的结构体进行序列化时，会递归地对`encode`指针指向的对象进行，可能会导致堆栈溢出错误。
+1. rpc调用传参相关问题。  
+实现`bucket`的时候一开始使用链表写法，因为结构体内含指针，出现循环引用问题。`rpc`调用会对参数进行`gob encoding`,当使用`encoding`包对这样的结构体进行序列化时，会递归地对`encode`指针指向的对象进行，可能会导致堆栈溢出错误。
 2. `kademlia`中的时间参数与程序运行时间和性能、数据冲突竞争或丢失息息相关，需要反复调试
 3. 在`Republish()`和`Store()`等函数中适当并发能极大提高效率
 
