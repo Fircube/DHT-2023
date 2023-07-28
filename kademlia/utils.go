@@ -13,8 +13,6 @@ const (
 )
 
 const (
-	// ExpireInterval    = 2000 * time.Millisecond
-	// RepublishInterval = 400 * time.Millisecond
 	ExpireInterval    = time.Second
 	RepublishInterval = time.Second
 	ExpireTime   = 960 * time.Second

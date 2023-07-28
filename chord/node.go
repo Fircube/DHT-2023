@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	f, _ := os.Create("dht-chord-test.log")
+	f, _ := os.Create("chord-test.log")
 	logrus.SetOutput(f)
 }
 
@@ -73,8 +73,6 @@ func (node *Node) Init(addr string) {
 }
 
 // RemoteCall calls the RPC method at addr.
-//
-// Re-connect to the client every time can be slow. You can use connection pool to improve the performance.
 func (node *Node) RemoteCall(addr string, method string, args interface{}, reply interface{}) error {
 	// if method != "Node.Ping" && method != "Node.FindSuccessor" {
 	// 	logrus.Infof("[RemoteCall] [%s] ask %s to %s with args:%v", node.Addr, addr, method, args)
@@ -102,16 +100,13 @@ func (node *Node) RemoteCall(addr string, method string, args interface{}, reply
 // RPC Methods
 //
 
+// PING RPC Probes a node to see if it's online
 func (node *Node) Ping(objectAddr string, _ *string) error {
 	return nil
 }
 
 // get
 func (node *Node) GetData(_ string, reply *map[string]string) error {
-	// if !node.online {
-	// 	logrus.Errorf("[GetData] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[GetData] [%s] is offline", node.Addr)
-	// }
 	node.dataLock.RLock()
 	*reply = node.data
 	node.dataLock.RUnlock()
@@ -119,10 +114,6 @@ func (node *Node) GetData(_ string, reply *map[string]string) error {
 }
 
 func (node *Node) GetPredecessor(_ string, reply *NodeInf) error {
-	// if !node.online {
-	// 	logrus.Errorf("[GetPredecessor] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[GetPredecessor] [%s] is offline", node.Addr)
-	// }
 	node.predecessorLock.RLock()
 	(*reply).Addr = node.predecessor.Addr
 	(*reply).Identify = Hash(node.predecessor.Addr)
@@ -131,10 +122,6 @@ func (node *Node) GetPredecessor(_ string, reply *NodeInf) error {
 }
 
 func (node *Node) GetSuccessorList(_ string, reply *[kSuccessorListSize]NodeInf) error {
-	// if !node.online {
-	// 	logrus.Errorf("[GetSuccessorList] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[GetSuccessorList]] [%s] is offline", node.Addr)
-	// }
 	node.successorListLock.RLock()
 	for i := 0; i < kSuccessorListSize; i++ {
 		(*reply)[i].Addr = node.successorList[i].Addr
@@ -146,10 +133,6 @@ func (node *Node) GetSuccessorList(_ string, reply *[kSuccessorListSize]NodeInf)
 
 // adjust pre/suc
 func (node *Node) FindSuccessor(arg NodeInf, reply *NodeInf) error {
-	// if !node.online {
-	// 	logrus.Errorf("[FindSuccessor] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[FindSuccessor] [%s] is offline", node.Addr)
-	// }
 	var suc NodeInf
 	suc.Addr = node.getSuccessor().Addr
 	suc.Identify = Hash(suc.Addr)
@@ -175,10 +158,6 @@ func (node *Node) FindSuccessor(arg NodeInf, reply *NodeInf) error {
 
 // adjust Data/Backup
 func (node *Node) TransferData(objectInf NodeInf, objectData *map[string]string) error {
-	// if !node.online {
-	// 	logrus.Errorf("[TransferData] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[TransferData] [%s] is offline", node.Addr)
-	// }
 	node.predecessorLock.Lock()
 	node.predecessor.Addr = objectInf.Addr
 	node.predecessor.Identify = Hash(node.predecessor.Addr)
@@ -211,10 +190,6 @@ func (node *Node) TransferData(objectInf NodeInf, objectData *map[string]string)
 }
 
 func (node *Node) PutBackup(pair Pair, _ *string) error {
-	// if !node.online {
-	// 	logrus.Errorf("[PutBackup] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[PutBackup] [%s] is offline", node.Addr)
-	// }
 	node.backupLock.Lock()
 	node.backup[pair.Key] = pair.Value
 	node.backupLock.Unlock()
@@ -222,10 +197,6 @@ func (node *Node) PutBackup(pair Pair, _ *string) error {
 }
 
 func (node *Node) PutBackups(objectData map[string]string, _ *string) error {
-	// if !node.online {
-	// 	logrus.Errorf("[PutBackups] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[PutBackups] [%s] is offline", node.Addr)
-	// }
 	node.backupLock.Lock()
 	for key, value := range objectData {
 		node.backup[key] = value
@@ -235,10 +206,6 @@ func (node *Node) PutBackups(objectData map[string]string, _ *string) error {
 }
 
 func (node *Node) DeleteBackup(key string, _ *string) error {
-	// if !node.online {
-	// 	logrus.Errorf("[DeleteBackup] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[DeleteBackup] [%s] is offline", node.Addr)
-	// }
 	node.backupLock.Lock()
 	defer node.backupLock.Unlock()
 	_, ok := node.backup[key]
@@ -252,10 +219,6 @@ func (node *Node) DeleteBackup(key string, _ *string) error {
 }
 
 func (node *Node) DeleteBackups(objectData map[string]string, _ *string) error {
-	// if !node.online {
-	// 	logrus.Errorf("[DeleteBackups] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[DeleteBackups] [%s] is offline", node.Addr)
-	// }
 	node.backupLock.Lock()
 	defer node.backupLock.Unlock()
 	for key := range objectData {
@@ -272,10 +235,6 @@ func (node *Node) DeleteBackups(objectData map[string]string, _ *string) error {
 
 // adjust value
 func (node *Node) PutValue(pair Pair, _ *string) error {
-	// if !node.online {
-	// 	logrus.Errorf("[PutValue] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[PutValue] [%s] is offline", node.Addr)
-	// }
 	node.dataLock.Lock()
 	node.data[pair.Key] = pair.Value
 	node.dataLock.Unlock()
@@ -293,10 +252,6 @@ func (node *Node) PutValue(pair Pair, _ *string) error {
 }
 
 func (node *Node) GetValue(key string, value *string) error {
-	// if !node.online {
-	// 	logrus.Errorf("[GetValue] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[GetValue] [%s] is offline", node.Addr)
-	// }
 	node.dataLock.RLock()
 	defer node.dataLock.RUnlock()
 	var ok bool
@@ -312,10 +267,6 @@ func (node *Node) GetValue(key string, value *string) error {
 }
 
 func (node *Node) DeleteValue(key string, _ *string) error {
-	// if !node.online {
-	// 	logrus.Errorf("[DeleteValue] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[DeleteValue] [%s] is offline", node.Addr)
-	// }
 	node.dataLock.RLock()
 	_, ok := node.data[key]
 	node.dataLock.RUnlock()
@@ -341,10 +292,6 @@ func (node *Node) DeleteValue(key string, _ *string) error {
 
 // periodly update
 func (node *Node) Stabilize(_ string, _ *string) error {
-	// if !node.online {
-	// 	logrus.Errorf("[Stabilize] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[Stabilize] [%s] is offline", node.Addr)
-	// }
 	// logrus.Infof("[Stabilize] [%s] start to stabilize",node.Addr)
 	var suc NodeInf
 	suc.Addr = node.getSuccessor().Addr
@@ -391,10 +338,6 @@ func (node *Node) Stabilize(_ string, _ *string) error {
 }
 
 func (node *Node) Notify(arg string, _ *string) error {
-	// if !node.online {
-	// 	logrus.Errorf("[Notify] [%s] is offline", node.Addr)
-	// 	return fmt.Errorf("[Notify] [%s] is offline", node.Addr)
-	// }
 	var pre NodeInf
 	pre.Addr = node.getPredecessor().Addr
 	pre.Identify = Hash(pre.Addr)
@@ -454,6 +397,11 @@ func (node *Node) Run() {
 	if err != nil {
 		logrus.Fatal("listen error: ", err)
 	}
+
+	node.onlineLock.Lock()
+	node.online = true
+	node.onlineLock.Unlock()
+
 	logrus.Infof("[Run] %s ", node.Addr)
 	go func() {
 		for node.online {
@@ -472,9 +420,6 @@ func (node *Node) Run() {
 		}
 		logrus.Infof("[StopRPCServer] [%s] stopped RPC server", node.Addr)
 	}()
-	node.onlineLock.Lock()
-	defer node.onlineLock.Unlock()
-	node.online = true
 }
 
 // "Create" or "Join" will be called after calling "Run".
@@ -547,12 +492,10 @@ func (node *Node) Join(addr string) bool {
 	return true
 }
 
-// "Normally" quit from current network.
-// You can inform other nodes in the network that you are leaving.
+// "Normally" quit from current network, can inform other nodes in the network that you are leaving.
 // "Quit" will not be called before "Create" or "Join".
 // For a dhtNode, "Quit" may be called for many times.
 // For a quited node, call "Quit" again should have no effect.
-
 func (node *Node) Quit() {
 	if !node.online {
 		logrus.Warnf("[Quit] [%s] is offline", node.Addr)
@@ -588,7 +531,6 @@ func (node *Node) Quit() {
 }
 
 // Quit the network without informing other nodes.
-// "ForceQuit" will be checked by TA manually.
 func (node *Node) ForceQuit() {
 	if !node.online {
 		logrus.Warnf("[ForceQuit] [%s] is offline", node.Addr)
@@ -626,7 +568,7 @@ func (node *Node) Put(key string, value string) bool {
 		logrus.Errorf("[Put] [%s] is offline", node.Addr)
 		return false
 	}
-	logrus.Infof("[Put] key:%s value:%s", key, value)
+	// logrus.Infof("[Put] key:%s value:%s", key, value)
 	var tar NodeInf
 	err := node.FindSuccessor(NodeInf{key, Hash(key)}, &tar)
 	if err != nil {
@@ -649,7 +591,7 @@ func (node *Node) Get(key string) (bool, string) {
 		logrus.Errorf("[Get] [%s] is offline", node.Addr)
 		return false, ""
 	}
-	logrus.Infof("[Get] key:%s", key)
+	// logrus.Infof("[Get] key:%s", key)
 	var tar NodeInf
 	err := node.FindSuccessor(NodeInf{key, Hash(key)}, &tar)
 	if err != nil {
@@ -672,7 +614,7 @@ func (node *Node) Delete(key string) bool {
 	logrus.Errorf("[Delete] [%s] is offline", node.Addr)
 	return false
 	}
-	logrus.Infof("[Delete] key:%s", key)
+	// logrus.Infof("[Delete] key:%s", key)
 	var tar NodeInf
 	err := node.FindSuccessor(NodeInf{key, Hash(key)}, &tar)
 	if err != nil {
@@ -764,9 +706,6 @@ func (node *Node) closestPrecedingFinger(id *big.Int) NodeInf {
 }
 
 func (node *Node) absorbBackups() {
-	// if !node.online {
-	// 	logrus.Errorf("[AbsorbBackups] [%s] is offline", node.Addr)
-	// }
 	node.dataLock.Lock()
 	node.backupLock.Lock()
 	for key, value := range node.backup {

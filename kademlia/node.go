@@ -82,6 +82,19 @@ func (node *Node) Putin(sp SPair, _ *string) error {
 	return nil
 }
 
+func (node *Node) PutinData(rt RepublishType, _ *string) error {
+	for key, value := range rt.Remove {
+		node.data.put(key,value)
+	}
+	addr := rt.Sender
+	if addr == "" || addr == node.Addr {
+		return nil
+	}
+	ind := cpl(Hash(addr), Hash(node.Addr))
+	node.KBucket[ind].delete(addr)
+	return nil
+}
+
 // Store instructs a node to store a <key,value> pair for later retrieval
 func (node *Node) Store(pair Pair, _ *string) error {
 	retList:=node.Lookup(pair.Key)
@@ -163,19 +176,6 @@ func (node *Node) RPCFindValue(st STtype, ret *FindValueReply) error {
 	return err
 }
 
-func (node *Node) PutinData(rt RepublishType, _ *string) error {
-	for key, value := range rt.Remove {
-		node.data.put(key,value)
-	}
-	addr := rt.Sender
-	if addr == "" || addr == node.Addr {
-		return nil
-	}
-	ind := cpl(Hash(addr), Hash(node.Addr))
-	node.KBucket[ind].delete(addr)
-	return nil
-}
-
 //
 // DHT methods for interfaces
 //
@@ -254,8 +254,7 @@ func (node *Node) Join(addr string) bool {
 	return true
 }
 
-// "Normally" quit from current network.
-// You can inform other nodes in the network that you are leaving.
+// "Normally" quit from current network, can inform other nodes in the network that you are leaving.
 // "Quit" will not be called before "Create" or "Join".
 // For a dhtNode, "Quit" may be called for many times.
 // For a quited node, call "Quit" again should have no effect.
@@ -288,7 +287,6 @@ func (node *Node) Quit() {
 }
 
 // Quit the network without informing other nodes.
-// "ForceQuit" will be checked by TA manually.
 func (node *Node) ForceQuit() {
 	if !node.online {
 		logrus.Warnf("[ForceQuit] [%s] is offline", node.Addr)
@@ -324,10 +322,6 @@ func (node *Node) Ping(addr string) bool {
 // Put a key-value pair into the network (if key exists, Update the value).
 // Return "true" if success, "false" otherwise.
 func (node *Node) Put(key string, value string) bool {
-	// if !node.online {
-	// 	logrus.Errorf("[Put] [%s] is offline", node.Addr)
-	// 	return false
-	// }
 	var empty string
 	err := node.Store(Pair{key, value}, &empty)
 	// logrus.Infof("[Put] [%s] %s", node.Addr, key)
@@ -337,10 +331,6 @@ func (node *Node) Put(key string, value string) bool {
 // Get a key-value pair from the network.
 // Return "true" and the value if success, "false" otherwise.
 func (node *Node) Get(key string) (bool, string) {
-	// if !node.online {
-	// 	logrus.Errorf("[Get] [%s] is offline", node.Addr)
-	// 	return false, ""
-	// }
 	var ret FindValueReply
 	err := node.FindValue(key, &ret)
 	if err != nil {
@@ -356,11 +346,7 @@ func (node *Node) Get(key string) (bool, string) {
 
 // Remove a key-value pair identified by KEY from the network.
 // Return "true" if success, "false" otherwise.
-func (node *Node) Delete(key string) bool {
-	// if !node.online {
-	// 	logrus.Errorf("[Delete] [%s] is offline", node.Addr)
-	// 	return false
-	// }
+func (node *Node) Delete(key string) bool { // kademlia协议不支持删除
 	return true
 }
 
@@ -456,15 +442,6 @@ func (node *Node) getvalue(key string, retList RetList) (bool, string) {
 	}
 	return false, ""
 }
-
-// func (node *Node) Update(addr string, _ *string) error {
-// 	if addr == "" || addr == node.Addr || !node.Ping(addr) {
-// 		return nil
-// 	}
-// 	ind := cpl(Hash(addr), Hash(node.Addr))
-// 	node.KBucket[ind].Update(addr)
-// 	return nil
-// }
 
 func (node *Node) update(addr string) {
 	if addr == "" || addr == node.Addr || !node.Ping(addr) {
