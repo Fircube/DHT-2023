@@ -75,7 +75,7 @@ type SPair struct{
 	Pair Pair
 }
 
-func (node *Node) Putin(sp SPair, _ *string) error {
+func (node *Node) Putin(sp SPair, add *string) error {
 	pair:=sp.Pair
 	node.data.put(pair.Key, pair.Value)
 	node.update(sp.Sender)
@@ -163,11 +163,11 @@ func (node *Node) RPCFindValue(st STtype, ret *FindValueReply) error {
 	return err
 }
 
-func (node *Node) PutinData(rt RepublishType, _ *string) error {
-	for key, value := range rt.Remove {
+func (node *Node) PutinData(remove map[string]string, add *string) error {
+	for key, value := range remove {
 		node.data.put(key,value)
 	}
-	addr := rt.Sender
+	addr := *add
 	if addr == "" || addr == node.Addr {
 		return nil
 	}
@@ -482,24 +482,16 @@ func (node *Node) republish() {
 	}
 }
 
-type RepublishType struct{
-	Sender string
-	Remove map[string]string
-}
-
 func (node *Node) republishAll() {
-	var rt RepublishType
-	rt.Sender=node.Addr
-	rt.Remove = make(map[string]string)
+	remove := make(map[string]string)
 	node.data.mu.RLock()
 	for k, v := range node.data.Data {
-		rt.Remove[k] = v
+		remove[k] = v
 	}
 	node.data.mu.RUnlock()
 	var nameList RetList
 	node.FindNode(node.Addr, &nameList)
 	nameList.Delete(node.Addr)
-	var empty string
 	var wg sync.WaitGroup
 	wg.Add(k)
 	for _, n := range nameList.PeerAddr {
@@ -509,7 +501,7 @@ func (node *Node) republishAll() {
 		}
 		var name = n
 		go func() {
-			RemoteCall(name, "Node.PutinData", rt, &empty)
+			RemoteCall(name, "Node.PutinData", remove, &node.Addr)
 			wg.Done()
 		}()
 	}
